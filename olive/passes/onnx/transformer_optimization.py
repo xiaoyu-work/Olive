@@ -96,10 +96,32 @@ class OrtTransformersOptimization(Pass):
 
         output_model_path = ONNXModel.resolve_path(os.path.join(output_model_path, os.path.basename(model.model_path)))
 
-        if config["optimization_options"]:
+        optimization_options = config["optimization_options"]
+        if optimization_options:
             self._set_fusion_options(run_config)
 
         optimizer = transformers_optimizer.optimize_model(input=model.model_path, **run_config)
+
+        # TODO: Remove once this is merged into ORT's fusion_attention_unet.py script
+        if optimization_options and optimization_options.get("use_lora_multi_head_attention", False):
+            from onnxruntime.transformers.onnx_model_bert import BertOnnxModel
+
+            from olive.passes.onnx.fusion_attention_unet_lora import FusionAttentionUnetLora
+
+            # The model type doesn't matter here, so get the most base one
+            base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
+
+            # Self Attention
+            self_attention_fusion = FusionAttentionUnetLora(
+                base_model, base_model.hidden_size, base_model.num_heads, False, True, False
+            )
+            self_attention_fusion.apply()
+
+            # Cross Attention
+            cross_attention_fusion = FusionAttentionUnetLora(
+                base_model, base_model.hidden_size, base_model.num_heads, True, False, True
+            )
+            cross_attention_fusion.apply()
 
         if config["float16"]:
             op_block_list = config["force_fp32_ops"]

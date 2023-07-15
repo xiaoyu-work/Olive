@@ -24,7 +24,15 @@ from olive.workflows import run as olive_run
 
 
 def run_inference_loop(
-    pipeline, prompt, num_images, batch_size, image_size, num_inference_steps, image_callback=None, step_callback=None
+    pipeline,
+    prompt,
+    negative_prompt,
+    num_images,
+    batch_size,
+    image_size,
+    num_inference_steps,
+    image_callback=None,
+    step_callback=None,
 ):
     images_saved = 0
 
@@ -36,6 +44,7 @@ def run_inference_loop(
         print(f"\nInference Batch Start (batch size = {batch_size}).")
         result = pipeline(
             [prompt] * batch_size,
+            negative_prompt=[negative_prompt] * batch_size,
             num_inference_steps=num_inference_steps,
             callback=update_steps if step_callback else None,
             height=image_size,
@@ -57,7 +66,7 @@ def run_inference_loop(
         print(f"Inference Batch End ({passed_safety_checker}/{batch_size} images passed the safety checker).")
 
 
-def run_inference_gui(pipeline, prompt, num_images, batch_size, image_size, num_inference_steps):
+def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps):
     def update_progress_bar(total_steps_completed):
         progress_bar["value"] = total_steps_completed
 
@@ -77,6 +86,7 @@ def run_inference_gui(pipeline, prompt, num_images, batch_size, image_size, num_
             args=(
                 pipeline,
                 prompt_textbox.get(),
+                negative_prompt_textbox.get(),
                 num_images,
                 batch_size,
                 image_size,
@@ -96,10 +106,11 @@ def run_inference_gui(pipeline, prompt, num_images, batch_size, image_size, num_
 
     bar_height = 10
     button_width = 80
-    button_height = 30
+    textbox_height = 30
+    label_width = 100
     padding = 2
     window_width = image_cols * image_size + (image_cols + 1) * padding
-    window_height = image_rows * image_size + (image_rows + 1) * padding + bar_height + button_height
+    window_height = image_rows * image_size + (image_rows + 1) * padding + bar_height + textbox_height * 2
 
     window = tk.Tk()
     window.title("Stable Diffusion")
@@ -120,18 +131,40 @@ def run_inference_gui(pipeline, prompt, num_images, batch_size, image_size, num_
 
     y += bar_height
 
+    prompt_label = tk.Label(window, text="Prompt")
+    prompt_label.place(x=0, y=y)
+
     prompt_textbox = tk.Entry(window)
     prompt_textbox.insert(tk.END, prompt)
-    prompt_textbox.place(x=0, y=y, width=window_width - button_width, height=button_height)
+    prompt_textbox.place(x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height)
 
     generate_button = tk.Button(window, text="Generate", command=on_generate_click)
-    generate_button.place(x=window_width - button_width, y=y, width=button_width, height=button_height)
+    generate_button.place(x=window_width - button_width, y=y, width=button_width, height=textbox_height * 2)
+
+    y += textbox_height
+
+    negative_prompt_label = tk.Label(window, text="Negative Prompt")
+    negative_prompt_label.place(x=0, y=y)
+
+    negative_prompt_textbox = tk.Entry(window)
+    negative_prompt_textbox.insert(tk.END, negative_prompt)
+    negative_prompt_textbox.place(
+        x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height
+    )
 
     window.mainloop()
 
 
 def run_inference(
-    optimized_model_dir, prompt, num_images, batch_size, image_size, num_inference_steps, static_dims, interactive
+    optimized_model_dir,
+    prompt,
+    negative_prompt,
+    num_images,
+    batch_size,
+    image_size,
+    num_inference_steps,
+    static_dims,
+    interactive,
 ):
     ort.set_default_logger_severity(3)
 
@@ -156,9 +189,9 @@ def run_inference(
     )
 
     if interactive:
-        run_inference_gui(pipeline, prompt, num_images, batch_size, image_size, num_inference_steps)
+        run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps)
     else:
-        run_inference_loop(pipeline, prompt, num_images, batch_size, image_size, num_inference_steps)
+        run_inference_loop(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps)
 
 
 def optimize(
@@ -294,6 +327,11 @@ if __name__ == "__main__":
         ),
         type=str,
     )
+    parser.add_argument(
+        "--negative_prompt",
+        default="",
+        type=str,
+    )
     parser.add_argument("--num_images", default=1, type=int, help="Number of images to generate")
     parser.add_argument("--batch_size", default=1, type=int, help="Number of images to generate per batch")
     parser.add_argument("--num_inference_steps", default=50, type=int, help="Number of steps in diffusion process")
@@ -319,6 +357,8 @@ if __name__ == "__main__":
         "stabilityai/stable-diffusion-2-base": 768,
         "stabilityai/stable-diffusion-2-1": 768,
         "stabilityai/stable-diffusion-2-1-base": 768,
+        "rhendz/niji-lora": 512,
+        "sayakpaul/lora-trained": 512,
     }
 
     if args.model_id not in list(model_to_image_size.keys()):
@@ -355,6 +395,7 @@ if __name__ == "__main__":
             run_inference(
                 model_dir,
                 args.prompt,
+                args.negative_prompt,
                 args.num_images,
                 args.batch_size,
                 config.image_size,

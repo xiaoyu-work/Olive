@@ -56,6 +56,7 @@
                     "enable_layer_norm": true,
                     "enable_attention": true,
                     "use_multi_head_attention": true,
+                    "use_lora_multi_head_attention": true,
                     "enable_skip_layer_norm": false,
                     "enable_embed_layer_norm": true,
                     "enable_bias_skip_layer_norm": false,

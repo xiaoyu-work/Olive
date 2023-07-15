@@ -4,10 +4,9 @@
 # --------------------------------------------------------------------------
 import config
 import torch
-from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers import AutoencoderKL, StableDiffusionPipeline
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from huggingface_hub import model_info
-from transformers.models.clip.modeling_clip import CLIPTextModel
 
 
 # Helper latency-only dataloader that creates random tensors with no label
@@ -113,10 +112,10 @@ def text_encoder_inputs(batchsize, torch_dtype):
 
 def text_encoder_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    model = CLIPTextModel.from_pretrained(base_model_id, subfolder="text_encoder")
+    pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
     if is_lora_model(model_name):
-        merge_lora_weights(model, model_name, "text_encoder")
-    return model
+        pipe.load_lora_weights(model_name)
+    return pipe.text_encoder
 
 
 def text_encoder_conversion_inputs(model):
@@ -143,10 +142,10 @@ def unet_inputs(batchsize, torch_dtype):
 
 def unet_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    model = UNet2DConditionModel.from_pretrained(base_model_id, subfolder="unet")
+    pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
     if is_lora_model(model_name):
-        merge_lora_weights(model, model_name, "unet")
-    return model
+        pipe.load_lora_weights(model_name)
+    return pipe.unet
 
 
 def unet_conversion_inputs(model):
