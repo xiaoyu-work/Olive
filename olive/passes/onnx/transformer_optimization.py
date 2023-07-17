@@ -108,7 +108,7 @@ class OrtTransformersOptimization(Pass):
 
             from olive.passes.onnx.fusion_attention_unet_lora import FusionAttentionUnetLora
 
-            # The model type doesn't matter here, so get the most base one
+            # The model type doesn't matter here, so get the base model
             base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
 
             # Self Attention
@@ -122,6 +122,16 @@ class OrtTransformersOptimization(Pass):
                 base_model, base_model.hidden_size, base_model.num_heads, True, False, True
             )
             cross_attention_fusion.apply()
+
+        if optimization_options and optimization_options.get("rename_lora_weights", False):
+            from onnxruntime.transformers.onnx_model_bert import BertOnnxModel
+
+            from olive.passes.onnx.lora_weights_renamer import LoraWeightsRenamer
+
+            # The model type doesn't matter here, so get the base model
+            base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
+            lora_weights_renamer = LoraWeightsRenamer(base_model)
+            lora_weights_renamer.apply()
 
         if config["float16"]:
             op_block_list = config["force_fp32_ops"]

@@ -1,4 +1,4 @@
-diffusers
+diffusers  @ git+https://github.com/PatriceVignola/diffusers@5d67a28
 transformers
 onnx
 accelerate

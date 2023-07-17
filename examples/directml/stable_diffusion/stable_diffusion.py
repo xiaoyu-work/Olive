@@ -10,13 +10,16 @@ import tkinter as tk
 import tkinter.ttk as ttk
 import warnings
 from pathlib import Path
+from tkinter import filedialog as fd
 
 import config
+import numpy as np
 import onnxruntime as ort
 import torch
 from diffusers import OnnxRuntimeModel, OnnxStableDiffusionPipeline, StableDiffusionPipeline
 from packaging import version
 from PIL import Image, ImageTk
+from safetensors.numpy import load_file
 from user_script import get_base_model_name
 
 from olive.model import ONNXModel
@@ -31,10 +34,36 @@ def run_inference_loop(
     batch_size,
     image_size,
     num_inference_steps,
+    lora_weights_filename=None,
     image_callback=None,
     step_callback=None,
 ):
     images_saved = 0
+
+    unet_additional_inputs = {}
+
+    if lora_weights_filename is not None:
+        if lora_weights_filename.endswith(".bin"):
+            lora_weights = torch.load(lora_weights_filename, map_location="cpu", weights_only=True)
+        elif lora_weights_filename.endswith(".safetensors"):
+            lora_weights = load_file(lora_weights_filename)
+
+        for weight_name, weight_value in lora_weights.items():
+            if "lora" not in weight_name:
+                continue
+
+            new_values = np.transpose(weight_value.numpy().astype(np.float16))
+
+            if weight_name.startswith("unet."):
+                prefix_length = len("unet.")
+                new_weight_name = weight_name[prefix_length:]
+            elif weight_name.startswith("text_encoder."):
+                prefix_length = len("text_encoder.")
+                new_weight_name = weight_name[prefix_length:]
+            else:
+                new_weight_name = weight_name
+
+            unet_additional_inputs[new_weight_name] = new_values
 
     def update_steps(step, timestep, latents):
         if step_callback:
@@ -44,6 +73,7 @@ def run_inference_loop(
         print(f"\nInference Batch Start (batch size = {batch_size}).")
         result = pipeline(
             [prompt] * batch_size,
+            unet_additional_inputs=unet_additional_inputs,
             negative_prompt=[negative_prompt] * batch_size,
             num_inference_steps=num_inference_steps,
             callback=update_steps if step_callback else None,
@@ -70,6 +100,8 @@ def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size,
     def update_progress_bar(total_steps_completed):
         progress_bar["value"] = total_steps_completed
 
+    lora_weights_filename = None
+
     def image_completed(index, path):
         img = Image.open(path)
         photo = ImageTk.PhotoImage(img)
@@ -91,10 +123,15 @@ def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size,
                 batch_size,
                 image_size,
                 num_inference_steps,
+                lora_weights_filename,
                 image_completed,
                 update_progress_bar,
             ),
         ).start()
+
+    def on_lora_weights_click():
+        nonlocal lora_weights_filename
+        lora_weights_filename = fd.askopenfilename()
 
     if num_images > 9:
         print("WARNING: interactive UI only supports displaying up to 9 images")
@@ -109,7 +146,7 @@ def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size,
     textbox_height = 30
     label_width = 100
     padding = 2
-    window_width = image_cols * image_size + (image_cols + 1) * padding
+    window_width = image_cols * image_size + (image_cols + 1) * padding + 100
     window_height = image_rows * image_size + (image_rows + 1) * padding + bar_height + textbox_height * 2
 
     window = tk.Tk()
@@ -136,9 +173,12 @@ def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size,
 
     prompt_textbox = tk.Entry(window)
     prompt_textbox.insert(tk.END, prompt)
-    prompt_textbox.place(x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height)
+    prompt_textbox.place(x=label_width, y=y, width=window_width - button_width * 2 - label_width, height=textbox_height)
 
     generate_button = tk.Button(window, text="Generate", command=on_generate_click)
+    generate_button.place(x=window_width - button_width * 2, y=y, width=button_width, height=textbox_height * 2)
+
+    generate_button = tk.Button(window, text="LoRA Weights", command=on_lora_weights_click)
     generate_button.place(x=window_width - button_width, y=y, width=button_width, height=textbox_height * 2)
 
     y += textbox_height
@@ -149,7 +189,7 @@ def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size,
     negative_prompt_textbox = tk.Entry(window)
     negative_prompt_textbox.insert(tk.END, negative_prompt)
     negative_prompt_textbox.place(
-        x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height
+        x=label_width, y=y, width=window_width - button_width * 2 - label_width, height=textbox_height
     )
 
     window.mainloop()
@@ -159,6 +199,7 @@ def run_inference(
     optimized_model_dir,
     prompt,
     negative_prompt,
+    lora_weights_path,
     num_images,
     batch_size,
     image_size,
@@ -191,7 +232,16 @@ def run_inference(
     if interactive:
         run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps)
     else:
-        run_inference_loop(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps)
+        run_inference_loop(
+            pipeline,
+            prompt,
+            negative_prompt,
+            num_images,
+            batch_size,
+            image_size,
+            num_inference_steps,
+            lora_weights_path,
+        )
 
 
 def optimize(
@@ -332,6 +382,11 @@ if __name__ == "__main__":
         default="",
         type=str,
     )
+    parser.add_argument(
+        "--lora_weights",
+        default=None,
+        type=str,
+    )
     parser.add_argument("--num_images", default=1, type=int, help="Number of images to generate")
     parser.add_argument("--batch_size", default=1, type=int, help="Number of images to generate per batch")
     parser.add_argument("--num_inference_steps", default=50, type=int, help="Number of steps in diffusion process")
@@ -396,6 +451,7 @@ if __name__ == "__main__":
                 model_dir,
                 args.prompt,
                 args.negative_prompt,
+                args.lora_weights,
                 args.num_images,
                 args.batch_size,
                 config.image_size,
