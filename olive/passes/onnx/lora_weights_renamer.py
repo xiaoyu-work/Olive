@@ -26,15 +26,13 @@ class LoraWeightsRenamer(Fusion):
         for node in matmul_nodes:
             if "lora" in node.name:
                 result = re.search(
-                    (
-                        r"/([a-z]+_blocks\.\d+|mid_block)"
-                        r"/(attentions\.\d+)"
-                        r"/(transformer_blocks\.\d+)"
-                        r"/(attn\d+)"
-                        r"/(to_[a-z]+_lora)"
-                        r"/(up|down)"
-                        "/MatMul",
-                    ),
+                    r"/([a-z]+_blocks\.\d+|mid_block)"
+                    r"/(attentions\.\d+)"
+                    r"/(transformer_blocks\.\d+)"
+                    r"/(attn\d+)"
+                    r"/(to_[a-z]+_lora)"
+                    r"/(up|down)"
+                    "/MatMul",
                     node.name,
                 )
 
