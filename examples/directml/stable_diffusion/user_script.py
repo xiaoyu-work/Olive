@@ -94,7 +94,13 @@ def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.
 
     # Merge LoRA attention processor weights into existing Q/K/V/Out weights
     for name, proc in attn_processors.items():
-        attention_name = name[: -len(".processor")]
+        processor_len = -len(".processor")
+        if name.startswith(f"{submodel_name}."):
+            submodel_name_len = len(f"{submodel_name}.")
+            attention_name = name[submodel_name_len:processor_len]
+        else:
+            attention_name = name[:processor_len]
+
         attention = reduce(getattr, attention_name.split(sep="."), base_model)
         attention.to_q.weight.data += scale * torch.mm(proc.to_q_lora.up.weight, proc.to_q_lora.down.weight)
         attention.to_k.weight.data += scale * torch.mm(proc.to_k_lora.up.weight, proc.to_k_lora.down.weight)
@@ -114,7 +120,7 @@ def text_encoder_inputs(batchsize, torch_dtype):
 def text_encoder_load(model_name):
     base_model_id = get_base_model_name(model_name)
 
-    if config.lora_weights_as_inputs:
+    if config.lora_weights_strategy in ("input_binding", "initializers"):
         pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
         if config.lora_weights_file is not None:
             pipe.load_lora_weights(config.lora_weights_file)
@@ -124,10 +130,12 @@ def text_encoder_load(model_name):
         return pipe.text_encoder
 
     model = CLIPTextModel.from_pretrained(base_model_id, subfolder="text_encoder")
-    if config.lora_weights_file is not None:
-        merge_lora_weights(model, config.lora_weights_file, "text_encoder")
-    elif is_lora_model(model_name):
-        merge_lora_weights(model, model_name, "text_encoder")
+
+    if config.lora_weights_strategy == "baked":
+        if config.lora_weights_file is not None:
+            merge_lora_weights(model, config.lora_weights_file, "text_encoder")
+        elif is_lora_model(model_name):
+            merge_lora_weights(model, model_name, "text_encoder")
 
     return model
 
@@ -239,7 +247,7 @@ def unet_inputs(batchsize, torch_dtype, is_conversion_inputs=False):
         inputs["onnx::Concat_4"] = torch.rand((1, 1280), dtype=torch_dtype)
         inputs["onnx::Shape_5"] = torch.rand((1, 5), dtype=torch_dtype)
 
-        if config.lora_weights_as_inputs:
+        if config.lora_weights_strategy == "input_binding":
             inputs.update(generate_unet_lora_inputs(torch_dtype))
 
     return inputs
@@ -248,7 +256,7 @@ def unet_inputs(batchsize, torch_dtype, is_conversion_inputs=False):
 def unet_load(model_name):
     base_model_id = get_base_model_name(model_name)
 
-    if config.lora_weights_as_inputs:
+    if config.lora_weights_strategy in ("input_binding", "initializers"):
         pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
         if config.lora_weights_file is not None:
             pipe.load_lora_weights(config.lora_weights_file)
@@ -258,10 +266,12 @@ def unet_load(model_name):
         return pipe.unet
 
     model = UNet2DConditionModel.from_pretrained(base_model_id, subfolder="unet")
-    if config.lora_weights_file is not None:
-        merge_lora_weights(model, config.lora_weights_file, "unet")
-    elif is_lora_model(model_name):
-        merge_lora_weights(model, model_name, "unet")
+
+    if config.lora_weights_strategy == "baked":
+        if config.lora_weights_file is not None:
+            merge_lora_weights(model, config.lora_weights_file, "unet")
+        elif is_lora_model(model_name):
+            merge_lora_weights(model, model_name, "unet")
 
     return model
 

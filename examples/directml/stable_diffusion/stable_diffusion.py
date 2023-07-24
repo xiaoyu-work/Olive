@@ -479,7 +479,7 @@ if __name__ == "__main__":
 
     config.image_size = model_to_image_size.get(args.model_id, 512)
     config.lora_weights_file = args.lora_weights
-    config.lora_weights_as_inputs = args.lora_weights_strategy == "input_binding"
+    config.lora_weights_strategy = args.lora_weights_strategy
 
     if args.optimize or not optimized_model_dir.exists():
         # TODO: clean up warning filter (mostly during conversion from torch to ONNX)
