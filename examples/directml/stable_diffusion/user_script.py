@@ -4,7 +4,7 @@
 # --------------------------------------------------------------------------
 import config
 import torch
-from diffusers import AutoencoderKL, StableDiffusionPipeline
+from diffusers import AutoencoderKL, StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from huggingface_hub import model_info
 from transformers.models.clip.modeling_clip import CLIPTextModel
@@ -113,10 +113,23 @@ def text_encoder_inputs(batchsize, torch_dtype):
 
 def text_encoder_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
-    if is_lora_model(model_name):
-        pipe.load_lora_weights(model_name)
-    return pipe.text_encoder
+
+    if config.lora_weights_as_inputs:
+        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+        if config.lora_weights_file is not None:
+            pipe.load_lora_weights(config.lora_weights_file)
+        elif is_lora_model(model_name):
+            pipe.load_lora_weights(model_name)
+
+        return pipe.text_encoder
+
+    model = CLIPTextModel.from_pretrained(base_model_id, subfolder="text_encoder")
+    if config.lora_weights_file is not None:
+        merge_lora_weights(model, config.lora_weights_file, "text_encoder")
+    elif is_lora_model(model_name):
+        merge_lora_weights(model, model_name, "text_encoder")
+
+    return model
 
 
 def text_encoder_conversion_inputs(model):
@@ -139,8 +152,6 @@ def text_encoder_2_inputs(batchsize, torch_dtype):
 def text_encoder_2_load(model_name):
     base_model_id = get_base_model_name(model_name)
     model = CLIPTextModel.from_pretrained(base_model_id, subfolder="text_encoder_2")
-    if is_lora_model(model_name):
-        merge_lora_weights(model, model_name, "text_encoder_2")
     return model
 
 
@@ -155,6 +166,57 @@ def text_encoder_2_data_loader(data_dir, batchsize, *args, **kwargs):
 # -----------------------------------------------------------------------------
 # UNET
 # -----------------------------------------------------------------------------
+
+# This only works for SD 1.4/1.5/2.0/2.1 and .bin weights formats
+# TODO: Make it more generic and support more weight types
+def generate_unet_lora_inputs(dtype):
+    lora_inputs = {}
+
+    weight_kinds = ("q", "k", "v", "out")
+    weight_positions = ("down", "up")
+
+    for i in range(256):
+        is_cross_attention = (i % 16) // 8 == 1
+        is_k_weight = (i % 8) // 2 == 1
+        is_v_weight = (i % 8) // 2 == 2
+        is_down_pos = i % 2 == 0
+
+        if i < 16:
+            input_name = "mid_block.attentions.0"
+
+            if is_down_pos:
+                input_shape = (768, 4) if (is_cross_attention and (is_k_weight or is_v_weight)) else (1280, 4)
+            else:
+                input_shape = (4, 1280)
+        elif i < 112:
+            block_index = (i - 16) // 32
+            input_name = f"down_blocks.{block_index}.attentions.{((i - 16) % 32) // 16}"
+
+            if is_down_pos:
+                input_shape = (
+                    (768, 4) if (is_cross_attention and (is_k_weight or is_v_weight)) else (320 * (2**block_index), 4)
+                )
+            else:
+                input_shape = (4, 320 * (2**block_index))
+        else:
+            block_index = (i - 112) // 48
+            input_name = f"up_blocks.{block_index + 1}.attentions.{((i - 112) % 48) // 16}"
+
+            if is_down_pos:
+                input_shape = (
+                    (768, 4)
+                    if (is_cross_attention and (is_k_weight or is_v_weight))
+                    else (320 * (2 ** (2 - block_index)), 4)
+                )
+            else:
+                input_shape = (4, 320 * (2 ** (2 - block_index)))
+
+        input_name += f".transformer_blocks.0.attn{(i % 16) // 8 + 1}"
+        input_name += f".processor.to_{weight_kinds[(i % 8) // 2]}_lora"
+        input_name += f".{weight_positions[i % 2]}.weight"
+        lora_inputs[input_name] = torch.rand(input_shape, dtype=dtype)
+
+    return lora_inputs
 
 
 def unet_inputs(batchsize, torch_dtype, is_conversion_inputs=False):
@@ -177,15 +239,31 @@ def unet_inputs(batchsize, torch_dtype, is_conversion_inputs=False):
         inputs["onnx::Concat_4"] = torch.rand((1, 1280), dtype=torch_dtype)
         inputs["onnx::Shape_5"] = torch.rand((1, 5), dtype=torch_dtype)
 
+        if config.lora_weights_as_inputs:
+            inputs.update(generate_unet_lora_inputs(torch_dtype))
+
     return inputs
 
 
 def unet_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
-    if is_lora_model(model_name):
-        pipe.load_lora_weights(model_name)
-    return pipe.unet
+
+    if config.lora_weights_as_inputs:
+        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+        if config.lora_weights_file is not None:
+            pipe.load_lora_weights(config.lora_weights_file)
+        elif is_lora_model(model_name):
+            pipe.load_lora_weights(model_name)
+
+        return pipe.unet
+
+    model = UNet2DConditionModel.from_pretrained(base_model_id, subfolder="unet")
+    if config.lora_weights_file is not None:
+        merge_lora_weights(model, config.lora_weights_file, "unet")
+    elif is_lora_model(model_name):
+        merge_lora_weights(model, model_name, "unet")
+
+    return model
 
 
 def unet_conversion_inputs(model):

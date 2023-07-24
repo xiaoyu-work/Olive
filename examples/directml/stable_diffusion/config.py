@@ -4,3 +4,5 @@
 # --------------------------------------------------------------------------
 
 image_size = 512
+lora_weights_file = None
+lora_weights_as_inputs = False

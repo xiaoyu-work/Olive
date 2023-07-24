@@ -17,8 +17,9 @@ class LoraWeightsRenamer(Fusion):
     Rename the LoRA weights to make them easily interchangeable.
     """
 
-    def __init__(self, model: OnnxModel):
+    def __init__(self, model: OnnxModel, lora_weights_as_inputs: bool):
         self.model = model
+        self.lora_weights_as_inputs = lora_weights_as_inputs
 
     def apply(self):
         matmul_nodes = self.model.get_nodes_by_op_type("MatMul")
@@ -48,9 +49,14 @@ class LoraWeightsRenamer(Fusion):
                         f".{result.group(6)}"
                         ".weight"
                     )
-                    initializer.name = new_name
-                    new_input = onnx.helper.make_tensor_value_info(new_name, initializer.data_type, initializer.dims)
-                    self.model.add_input(new_input)
                     node.input[1] = new_name
+
+                    if self.lora_weights_as_inputs:
+                        new_input = onnx.helper.make_tensor_value_info(
+                            new_name, initializer.data_type, initializer.dims
+                        )
+                        self.model.add_input(new_input)
+                    else:
+                        initializer.name = new_name
 
         self.model.update_graph()

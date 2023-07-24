@@ -78,7 +78,7 @@
                     "enable_packed_qkv": true,
                     "enable_packed_kv": true,
                     "enable_bias_add": false,
-                    "rename_lora_weights": true
+                    "lora_weights_strategy": "input_binding"
                 },
                 "force_fp32_ops": ["RandomNormalLike"]
             }

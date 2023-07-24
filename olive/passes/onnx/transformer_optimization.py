@@ -123,15 +123,18 @@ class OrtTransformersOptimization(Pass):
             )
             cross_attention_fusion.apply()
 
-        if optimization_options and optimization_options.get("rename_lora_weights", False):
+        if optimization_options:
             from onnxruntime.transformers.onnx_model_bert import BertOnnxModel
 
             from olive.passes.onnx.lora_weights_renamer import LoraWeightsRenamer
 
-            # The model type doesn't matter here, so get the base model
-            base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
-            lora_weights_renamer = LoraWeightsRenamer(base_model)
-            lora_weights_renamer.apply()
+            lora_weights_strategy = optimization_options.get("lora_weights_strategy", "initializers")
+
+            if lora_weights_strategy != "baked":
+                # The model type doesn't matter here, so get the base model
+                base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
+                lora_weights_renamer = LoraWeightsRenamer(base_model, lora_weights_strategy == "input_binding")
+                lora_weights_renamer.apply()
 
         if config["float16"]:
             op_block_list = config["force_fp32_ops"]

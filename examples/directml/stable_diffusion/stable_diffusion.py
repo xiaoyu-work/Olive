@@ -249,6 +249,7 @@ def optimize(
     model_id: str,
     unoptimized_model_dir: Path,
     optimized_model_dir: Path,
+    lora_weights_strategy: str,
 ):
     from google.protobuf import __version__ as protobuf_version
 
@@ -301,6 +302,9 @@ def optimize(
 
         if submodel_name in ("unet", "text_encoder"):
             olive_config["input_model"]["config"]["model_path"] = model_id
+            olive_config["passes"]["optimize"]["config"]["optimization_options"][
+                "lora_weights_strategy"
+            ] = lora_weights_strategy
         else:
             # Only the unet & text encoder are affected by LoRA, so it's better to use the base model ID for
             # other models: the Olive cache is based on the JSON config, and two LoRA variants with the same
@@ -410,6 +414,21 @@ if __name__ == "__main__":
         "--lora_weights",
         default=None,
         type=str,
+        help="Path to the .bin or .safetensors file containing the LoRA weights to add to the model.",
+    )
+    parser.add_argument(
+        "--lora_weights_strategy",
+        choices=["input_binding", "baked", "initializers"],
+        default="input_binding",
+        type=str,
+        help="Strategy to use when adding the LoRA weights. `input_binding` means that the weights will need to bound "
+        "as inputs, at runtime. Doing so can reduce performance but adds the flexibility of changing the weights "
+        "on the fly without reoptimizing or reloading the model. `baked` means that the weights will completely "
+        "be merged with the original model's weights. Doing so can improve performance but makes it impossible "
+        "to change the weights after the model is done optimizing. `initializers` means that the weights will be "
+        "inserted in the model as external initializers. Doing so has a similar performance to `baked` due to "
+        "constant folding, but adds the flexibility of being able to change the weights by overwriting the "
+        "external weights with different LoRA weights before creating a new session.",
     )
     parser.add_argument("--num_images", default=1, type=int, help="Number of images to generate")
     parser.add_argument("--batch_size", default=1, type=int, help="Number of images to generate per batch")
@@ -459,12 +478,14 @@ if __name__ == "__main__":
         shutil.rmtree(script_dir / "cache", ignore_errors=True)
 
     config.image_size = model_to_image_size.get(args.model_id, 512)
+    config.lora_weights_file = args.lora_weights
+    config.lora_weights_as_inputs = args.lora_weights_strategy == "input_binding"
 
     if args.optimize or not optimized_model_dir.exists():
         # TODO: clean up warning filter (mostly during conversion from torch to ONNX)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            optimize(args.model_id, unoptimized_model_dir, optimized_model_dir)
+            optimize(args.model_id, unoptimized_model_dir, optimized_model_dir, args.lora_weights_strategy)
 
     xl_models = [
         "stabilityai/stable-diffusion-xl-refiner-0.9",
