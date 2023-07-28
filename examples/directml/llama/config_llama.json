@@ -1,0 +1,91 @@
+{
+    "input_model":{
+        "type": "OptimumModel",
+        "config": {
+            "model_path": "decapoda-research/llama-7b-hf",
+            "model_components": ["decoder_model.onnx", "decoder_with_past_model.onnx"]
+        }
+    },
+    "systems": {
+        "local_system": {
+            "type": "LocalSystem",
+            "config": {
+                "accelerators": ["gpu"]
+            }
+        }
+    },
+    "evaluators": {
+        "common_evaluator": {
+            "metrics": [
+                {
+                    "name": "latency",
+                    "type": "latency",
+                    "sub_types": [{"name": "avg"}],
+                    "user_config": {
+                        "user_script": "user_script.py",
+                        "dataloader_func": "llama_data_loader",
+                        "batch_size": 1
+                    }
+                }
+            ]
+        }
+    },
+    "passes": {
+        "convert": {
+            "type": "OptimumConversion",
+            "config": {
+                "target_opset": 14,
+                "save_as_external_data": true,
+                "all_tensors_to_one_file": true
+            }
+        },
+        "optimize": {
+            "type": "OrtTransformersOptimization",
+            "config": {
+                "model_type": "gpt2",
+                "float16": true,
+                "use_gpu": false,
+                "keep_io_types": true,
+                "num_heads": 32,
+                "hidden_size": 4096,
+                "optimization_options": {
+                    "enable_gelu": true,
+                    "enable_layer_norm": true,
+                    "enable_attention": true,
+                    "use_multi_head_attention": true,
+                    "enable_skip_layer_norm": false,
+                    "enable_embed_layer_norm": true,
+                    "enable_bias_skip_layer_norm": false,
+                    "enable_bias_gelu": true,
+                    "enable_gelu_approximation": false,
+                    "enable_qordered_matmul": false,
+                    "enable_shape_inference": true,
+                    "enable_gemm_fast_gelu": false,
+                    "enable_nhwc_conv": false,
+                    "enable_group_norm": true,
+                    "enable_bias_splitgelu": false,
+                    "enable_packed_qkv": true,
+                    "enable_packed_kv": true,
+                    "enable_bias_add": false
+                }
+            }
+        },
+        "merge": {
+            "type": "OptimumMerging"
+        }
+    },
+    "engine": {
+        "search_strategy": {
+            "execution_order": "joint",
+            "search_algorithm": "exhaustive"
+        },
+        "evaluator": "common_evaluator",
+        "evaluate_input_model": false,
+        "host": "local_system",
+        "target": "local_system",
+        "cache_dir": "cache",
+        "output_name": "llama",
+        "output_dir": "footprints",
+        "execution_providers": ["DmlExecutionProvider"]
+    }
+}
