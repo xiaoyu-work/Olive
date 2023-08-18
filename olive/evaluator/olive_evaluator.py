@@ -304,6 +304,12 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
             for k in input_data.keys()
             if k in input_names
         }
+
+        # We make sure scalars keep their 0D shape since np.ascontiguousarray will upgrade them to 1D arrays
+        for k, v in input_data.items():
+            if isinstance(v, np.ndarray) and v.ndim == 0 or isinstance(v, torch.Tensor) and v.dim() == 0:
+                input_dict[k] = np.reshape(input_dict[k], [])
+
         return input_dict
 
     def _inference(
