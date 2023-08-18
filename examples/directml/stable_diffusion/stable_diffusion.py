@@ -423,12 +423,13 @@ if __name__ == "__main__":
         type=str,
         help="Strategy to use when adding the LoRA weights. `input_binding` means that the weights will need to bound "
         "as inputs, at runtime. Doing so can reduce performance but adds the flexibility of changing the weights "
-        "on the fly without reoptimizing or reloading the model. `baked` means that the weights will completely "
-        "be merged with the original model's weights. Doing so can improve performance but makes it impossible "
-        "to change the weights after the model is done optimizing. `initializers` means that the weights will be "
-        "inserted in the model as external initializers. Doing so has a similar performance to `baked` due to "
-        "constant folding, but adds the flexibility of being able to change the weights by overwriting the "
-        "external weights with different LoRA weights before creating a new session.",
+        "on the fly without reoptimizing or reloading the model. `baked` means that the weights will be completely "
+        "merged with the original model's weights. Doing so can improve performance but makes it impossible "
+        "to change the weights after the model has been optimized. `initializers` means that the weights will be "
+        "inserted in the model as external initializers. This strategy has a worse performance than `baked` due to "
+        "the additional GEMM operations, but adds the flexibility of being able to update the LoRA weights in the "
+        "future, independently of the default weights. Note that constant folding could be added in future onnxruntime"
+        "versions, which would make the `initializers` strategy perform as good as `baked`.",
     )
     parser.add_argument("--num_images", default=1, type=int, help="Number of images to generate")
     parser.add_argument("--batch_size", default=1, type=int, help="Number of images to generate per batch")
