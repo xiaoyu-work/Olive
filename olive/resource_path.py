@@ -74,6 +74,14 @@ class ResourcePath(AutoConfigClass):
         json_data = {"type": self.type, "config": self.config.to_json()}
         return serialize_to_json(json_data)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ResourcePath):
+            return False
+        return self.type == other.type and self.config.to_json() == other.config.to_json()
+
+    def __hash__(self) -> int:
+        return hash((self.config.to_json(), self.type))
+
 
 class ResourcePathConfig(ConfigBase):
     type: ResourceType = Field(..., description="Type of the resource.")
@@ -386,7 +394,8 @@ class AzureMLDatastore(ResourcePath):
             from azureml.fsspec import AzureMachineLearningFileSystem
         except ImportError:
             raise ImportError(
-                "azureml-fsspec is not installed. Please install azureml-fsspec to use AzureMLDatastore resource path."
+                "azureml-fsspec is not installed. Please install azureml-fsspec<=1.1.1"
+                " to use AzureMLDatastore resource path."
             )
         if fsspec is None:
             fsspec = AzureMachineLearningFileSystem(self.get_path())
@@ -417,7 +426,8 @@ class AzureMLDatastore(ResourcePath):
             from azureml.fsspec import AzureMachineLearningFileSystem
         except ImportError:
             raise ImportError(
-                "azureml-fsspec is not installed. Please install azureml-fsspec to use AzureMLDatastore resource path."
+                "azureml-fsspec is not installed. Please install azureml-fsspec<=1.1.1"
+                " to use AzureMLDatastore resource path."
             )
 
         azureml_client_config = self.get_aml_client_config()
