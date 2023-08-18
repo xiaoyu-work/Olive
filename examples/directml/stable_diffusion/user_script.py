@@ -4,8 +4,7 @@
 # --------------------------------------------------------------------------
 import config
 import torch
-from diffusers import AutoencoderKL, StableDiffusionPipeline, UNet2DConditionModel
-from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
+from diffusers import StableDiffusionPipeline, UNet2DConditionModel
 from huggingface_hub import model_info
 from transformers.models.clip.modeling_clip import CLIPTextModel
 
@@ -23,6 +22,9 @@ class RandomDataLoader:
 
 
 def get_base_model_name(model_name):
+    if model_name.endswith(".safetensors"):
+        return model_name
+
     return model_info(model_name).cardData.get("base_model", model_name)
 
 
@@ -145,7 +147,11 @@ def text_encoder_load(model_name):
     base_model_id = get_base_model_name(model_name)
 
     if config.lora_weights_strategy in ("input_binding", "initializers"):
-        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+        if base_model_id.endswith(".safetensors"):
+            pipe = StableDiffusionPipeline.from_single_file(base_model_id)
+        else:
+            pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+
         if config.lora_weights_file is not None:
             use_safetensors = config.lora_weights_file.endswith(".safetensors")
             pipe.load_lora_weights(config.lora_weights_file, use_safetensors=use_safetensors)
@@ -284,7 +290,11 @@ def unet_load(model_name):
     base_model_id = get_base_model_name(model_name)
 
     if config.lora_weights_strategy in ("input_binding", "initializers"):
-        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+        if base_model_id.endswith(".safetensors"):
+            pipe = StableDiffusionPipeline.from_single_file(base_model_id)
+        else:
+            pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+
         if config.lora_weights_file is not None:
             use_safetensors = config.lora_weights_file.endswith(".safetensors")
             pipe.load_lora_weights(config.lora_weights_file, use_safetensors=use_safetensors)
@@ -326,9 +336,14 @@ def vae_encoder_inputs(batchsize, torch_dtype):
 
 def vae_encoder_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    model = AutoencoderKL.from_pretrained(base_model_id, subfolder="vae")
-    model.forward = lambda sample, return_dict: model.encode(sample, return_dict)[0].sample()
-    return model
+
+    if base_model_id.endswith(".safetensors"):
+        pipe = StableDiffusionPipeline.from_single_file(base_model_id)
+    else:
+        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+
+    pipe.vae.forward = lambda sample, return_dict: pipe.vae.encode(sample, return_dict)[0].sample()
+    return pipe.vae
 
 
 def vae_encoder_conversion_inputs(model):
@@ -353,9 +368,14 @@ def vae_decoder_inputs(batchsize, torch_dtype):
 
 def vae_decoder_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    model = AutoencoderKL.from_pretrained(base_model_id, subfolder="vae")
-    model.forward = model.decode
-    return model
+
+    if base_model_id.endswith(".safetensors"):
+        pipe = StableDiffusionPipeline.from_single_file(base_model_id)
+    else:
+        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+
+    pipe.vae.forward = pipe.vae.decode
+    return pipe.vae
 
 
 def vae_decoder_conversion_inputs(model):
@@ -380,9 +400,14 @@ def safety_checker_inputs(batchsize, torch_dtype):
 
 def safety_checker_load(model_name):
     base_model_id = get_base_model_name(model_name)
-    model = StableDiffusionSafetyChecker.from_pretrained(base_model_id, subfolder="safety_checker")
-    model.forward = model.forward_onnx
-    return model
+
+    if base_model_id.endswith(".safetensors"):
+        pipe = StableDiffusionPipeline.from_single_file(base_model_id)
+    else:
+        pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
+
+    pipe.safety_checker.forward = pipe.safety_checker.forward_onnx
+    return pipe.safety_checker
 
 
 def safety_checker_conversion_inputs(model):

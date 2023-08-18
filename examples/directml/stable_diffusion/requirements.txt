@@ -7,3 +7,4 @@ torchvision==0.14.1
 pillow
 onnxruntime-directml>=1.15.0
 protobuf==3.20.3 # protobuf 4.x aborts with OOM when optimizing unet
+omegaconf

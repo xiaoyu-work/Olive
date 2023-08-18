@@ -17,7 +17,7 @@ import config
 import numpy as np
 import onnxruntime as ort
 import torch
-from diffusers import DiffusionPipeline, OnnxRuntimeModel, OnnxStableDiffusionPipeline
+from diffusers import DiffusionPipeline, OnnxRuntimeModel, OnnxStableDiffusionPipeline, StableDiffusionPipeline
 from lora_weights_conversion import convert_kohya_lora_to_diffusers
 from packaging import version
 from PIL import Image, ImageTk
@@ -288,7 +288,11 @@ def optimize(
     # This avoids an issue where the non-ONNX components (tokenizer, scheduler, and feature extractor) are not
     # automatically cached correctly if individual models are fetched one at a time.
     print("Download stable diffusion PyTorch pipeline...")
-    pipeline = DiffusionPipeline.from_pretrained(base_model_id, torch_dtype=torch.float32)
+    if model_id.endswith(".safetensors"):
+        pipeline = StableDiffusionPipeline.from_single_file(base_model_id, torch_dtype=torch.float32)
+    else:
+        print("Download stable diffusion PyTorch pipeline...")
+        pipeline = DiffusionPipeline.from_pretrained(base_model_id, torch_dtype=torch.float32)
 
     model_info = dict()
 
@@ -486,8 +490,14 @@ if __name__ == "__main__":
         exit(1)
 
     script_dir = Path(__file__).resolve().parent
-    unoptimized_model_dir = script_dir / "models" / "unoptimized" / args.model_id
-    optimized_model_dir = script_dir / "models" / "optimized" / args.model_id
+
+    if args.model_id.endswith(".safetensors"):
+        suffix = Path(args.model_id).stem
+        unoptimized_model_dir = script_dir / "models" / "unoptimized" / suffix
+        optimized_model_dir = script_dir / "models" / "optimized" / suffix
+    else:
+        unoptimized_model_dir = script_dir / "models" / "unoptimized" / args.model_id
+        optimized_model_dir = script_dir / "models" / "optimized" / args.model_id
 
     if args.clean_cache:
         shutil.rmtree(script_dir / "cache", ignore_errors=True)
