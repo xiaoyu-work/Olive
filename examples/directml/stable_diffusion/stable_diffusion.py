@@ -18,6 +18,7 @@ import numpy as np
 import onnxruntime as ort
 import torch
 from diffusers import DiffusionPipeline, OnnxRuntimeModel, OnnxStableDiffusionPipeline
+from lora_weights_conversion import convert_kohya_lora_to_diffusers
 from packaging import version
 from PIL import Image, ImageTk
 from safetensors.numpy import load_file
@@ -42,6 +43,7 @@ def run_inference_loop(
     images_saved = 0
 
     unet_additional_inputs = {}
+    text_encoder_additional_inputs = {}
 
     if lora_weights_filename is not None:
         if lora_weights_filename.endswith(".bin"):
@@ -49,22 +51,33 @@ def run_inference_loop(
         elif lora_weights_filename.endswith(".safetensors"):
             lora_weights = load_file(lora_weights_filename)
 
+        if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
+            lora_weights, alpha = convert_kohya_lora_to_diffusers(lora_weights)
+
+            rank = lora_weights[
+                "unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.processor.to_k_lora.down.weight"
+            ].shape[0]
+            print(f"rank: {rank}")
+
+            unet_additional_inputs["lora_network_alpha_per_rank"] = np.array(alpha / rank, dtype=np.float16)
+            text_encoder_additional_inputs["lora_network_alpha_per_rank"] = np.array(alpha / rank, dtype=np.float16)
+
         for weight_name, weight_value in lora_weights.items():
             if "lora" not in weight_name:
                 continue
 
-            new_values = np.transpose(weight_value.numpy().astype(np.float16))
+            if isinstance(weight_value, torch.Tensor):
+                weight_value = weight_value.numpy()
+
+            new_values = np.transpose(weight_value.astype(np.float16))
 
             if weight_name.startswith("unet."):
-                prefix_length = len("unet.")
-                new_weight_name = weight_name[prefix_length:]
+                unet_additional_inputs[weight_name] = new_values
             elif weight_name.startswith("text_encoder."):
-                prefix_length = len("text_encoder.")
-                new_weight_name = weight_name[prefix_length:]
-            else:
-                new_weight_name = weight_name
+                text_encoder_additional_inputs[weight_name] = new_values
 
-            unet_additional_inputs[new_weight_name] = new_values
+        unet_additional_inputs["lora_scale"] = np.array(1, dtype=np.float16)
+        text_encoder_additional_inputs["lora_scale"] = np.array(1, dtype=np.float16)
 
     def update_steps(step, timestep, latents):
         if step_callback:
@@ -75,6 +88,7 @@ def run_inference_loop(
         result = pipeline(
             [prompt] * batch_size,
             unet_additional_inputs=unet_additional_inputs,
+            text_encoder_additional_inputs=text_encoder_additional_inputs,
             negative_prompt=[negative_prompt] * batch_size,
             num_inference_steps=num_inference_steps,
             callback=update_steps if step_callback else None,

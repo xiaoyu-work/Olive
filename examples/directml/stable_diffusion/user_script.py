@@ -112,9 +112,33 @@ def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.
 # TEXT ENCODER
 # -----------------------------------------------------------------------------
 
+# This only works for SD 1.4/1.5/2.0/2.1 and .bin weights formats
+# TODO: Make it more generic and support more weight types
+def generate_text_encoder_lora_inputs():
+    lora_inputs = {}
+
+    weight_kinds = ("q", "k", "v", "out")
+    weight_positions = ("down", "up")
+
+    for i in range(12):
+        for kind in weight_kinds:
+            for pos in weight_positions:
+                input_shape = (128, 768) if pos == "up" else (768, 128)
+                input_name = f"text_encoder.text_model.encoder.layers.{i}.self_attn.to_{kind}_lora.{pos}.weight"
+                lora_inputs[input_name] = torch.rand(input_shape, dtype=torch.float16)
+
+    return lora_inputs
+
 
 def text_encoder_inputs(batchsize, torch_dtype):
-    return torch.zeros((batchsize, 77), dtype=torch_dtype)
+    inputs = {
+        "input_ids": torch.zeros((batchsize, 77), dtype=torch_dtype),
+    }
+
+    if config.lora_weights_strategy == "input_binding":
+        inputs.update(generate_text_encoder_lora_inputs())
+
+    return inputs
 
 
 def text_encoder_load(model_name):
@@ -123,7 +147,8 @@ def text_encoder_load(model_name):
     if config.lora_weights_strategy in ("input_binding", "initializers"):
         pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
         if config.lora_weights_file is not None:
-            pipe.load_lora_weights(config.lora_weights_file)
+            use_safetensors = config.lora_weights_file.endswith(".safetensors")
+            pipe.load_lora_weights(config.lora_weights_file, use_safetensors=use_safetensors)
         elif is_lora_model(model_name):
             pipe.load_lora_weights(model_name)
 
@@ -189,8 +214,10 @@ def generate_unet_lora_inputs(dtype):
         is_v_weight = (i % 8) // 2 == 2
         is_down_pos = i % 2 == 0
 
+        input_name = "unet"
+
         if i < 16:
-            input_name = "mid_block.attentions.0"
+            input_name += ".mid_block.attentions.0"
 
             if is_down_pos:
                 input_shape = (768, 4) if (is_cross_attention and (is_k_weight or is_v_weight)) else (1280, 4)
@@ -198,7 +225,7 @@ def generate_unet_lora_inputs(dtype):
                 input_shape = (4, 1280)
         elif i < 112:
             block_index = (i - 16) // 32
-            input_name = f"down_blocks.{block_index}.attentions.{((i - 16) % 32) // 16}"
+            input_name += f".down_blocks.{block_index}.attentions.{((i - 16) % 32) // 16}"
 
             if is_down_pos:
                 input_shape = (
@@ -208,7 +235,7 @@ def generate_unet_lora_inputs(dtype):
                 input_shape = (4, 320 * (2**block_index))
         else:
             block_index = (i - 112) // 48
-            input_name = f"up_blocks.{block_index + 1}.attentions.{((i - 112) % 48) // 16}"
+            input_name += f".up_blocks.{block_index + 1}.attentions.{((i - 112) % 48) // 16}"
 
             if is_down_pos:
                 input_shape = (
@@ -259,7 +286,8 @@ def unet_load(model_name):
     if config.lora_weights_strategy in ("input_binding", "initializers"):
         pipe = StableDiffusionPipeline.from_pretrained(base_model_id)
         if config.lora_weights_file is not None:
-            pipe.load_lora_weights(config.lora_weights_file)
+            use_safetensors = config.lora_weights_file.endswith(".safetensors")
+            pipe.load_lora_weights(config.lora_weights_file, use_safetensors=use_safetensors)
         elif is_lora_model(model_name):
             pipe.load_lora_weights(model_name)
 

@@ -7,6 +7,10 @@ import os
 from copy import deepcopy
 from typing import Any, Dict, List, Union
 
+import numpy as np
+import onnx.helper
+import onnx.numpy_helper
+
 from olive.hardware.accelerator import AcceleratorSpec, Device
 from olive.model import ONNXModel
 from olive.passes import Pass
@@ -157,13 +161,42 @@ class OrtTransformersOptimization(Pass):
 
             from olive.passes.onnx.lora_weights_renamer import LoraWeightsRenamer
 
-            lora_weights_strategy = optimization_options.get("lora_weights_strategy", "initializers")
+            lora_weights_strategy = optimization_options.get("lora_weights_strategy", "baked")
+            lora_weights_prefix = optimization_options.get("lora_weights_prefix", "")
 
             if lora_weights_strategy != "baked":
                 # The model type doesn't matter here, so get the base model
                 base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
-                lora_weights_renamer = LoraWeightsRenamer(base_model, lora_weights_strategy == "input_binding")
+                lora_weights_renamer = LoraWeightsRenamer(
+                    base_model, lora_weights_strategy == "input_binding", lora_weights_prefix
+                )
                 lora_weights_renamer.apply()
+
+                if lora_weights_strategy == "input_binding":
+                    for graph_input in optimizer.model.graph.input:
+                        if graph_input.name.endswith("lora.up.weight"):
+                            graph_input.type.tensor_type.shape.dim[0].ClearField("dim_value")
+                            graph_input.type.tensor_type.shape.dim[0].dim_param = "lora_rank"
+
+                            tensor_shape = (1, graph_input.type.tensor_type.shape.dim[1].dim_value)
+                            tensor_dtype = onnx.helper.tensor_dtype_to_np_dtype(graph_input.type.tensor_type.elem_type)
+                            tensor = np.zeros(tensor_shape).astype(tensor_dtype)
+                            initializer = onnx.numpy_helper.from_array(tensor, graph_input.name)
+                            optimizer.model.graph.initializer.add().CopyFrom(initializer)
+                        elif graph_input.name.endswith("lora.down.weight"):
+                            graph_input.type.tensor_type.shape.dim[1].ClearField("dim_value")
+                            graph_input.type.tensor_type.shape.dim[1].dim_param = "lora_rank"
+
+                            tensor_shape = (graph_input.type.tensor_type.shape.dim[0].dim_value, 1)
+                            tensor_dtype = onnx.helper.tensor_dtype_to_np_dtype(graph_input.type.tensor_type.elem_type)
+                            tensor = np.zeros(tensor_shape).astype(tensor_dtype)
+                            initializer = onnx.numpy_helper.from_array(tensor, graph_input.name)
+                            optimizer.model.graph.initializer.add().CopyFrom(initializer)
+                        elif graph_input.name == "lora_network_alpha_per_rank" or graph_input.name == "lora_scale":
+                            tensor_dtype = onnx.helper.tensor_dtype_to_np_dtype(graph_input.type.tensor_type.elem_type)
+                            tensor = np.ones([]).astype(tensor_dtype)
+                            initializer = onnx.numpy_helper.from_array(tensor, graph_input.name)
+                            optimizer.model.graph.initializer.add().CopyFrom(initializer)
 
         if config["float16"]:
             op_block_list = config["force_fp32_ops"]
