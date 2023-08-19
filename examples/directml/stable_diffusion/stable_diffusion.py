@@ -35,6 +35,7 @@ def run_inference_loop(
     num_images,
     batch_size,
     image_size,
+    lora_scale,
     num_inference_steps,
     lora_weights_filename=None,
     image_callback=None,
@@ -76,8 +77,11 @@ def run_inference_loop(
             elif weight_name.startswith("text_encoder."):
                 text_encoder_additional_inputs[weight_name] = new_values
 
-        unet_additional_inputs["lora_scale"] = np.array(1, dtype=np.float16)
-        text_encoder_additional_inputs["lora_scale"] = np.array(1, dtype=np.float16)
+        if len(unet_additional_inputs) > 0:
+            unet_additional_inputs["lora_scale"] = np.array(lora_scale, dtype=np.float16)
+
+        if len(text_encoder_additional_inputs) > 0:
+            text_encoder_additional_inputs["lora_scale"] = np.array(lora_scale, dtype=np.float16)
 
     def update_steps(step, timestep, latents):
         if step_callback:
@@ -111,7 +115,16 @@ def run_inference_loop(
         print(f"Inference Batch End ({passed_safety_checker}/{batch_size} images passed the safety checker).")
 
 
-def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps):
+def run_inference_gui(
+    pipeline,
+    prompt,
+    negative_prompt,
+    num_images,
+    batch_size,
+    image_size,
+    lora_scale,
+    num_inference_steps,
+):
     def update_progress_bar(total_steps_completed):
         progress_bar["value"] = total_steps_completed
 
@@ -137,6 +150,7 @@ def run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size,
                 num_images,
                 batch_size,
                 image_size,
+                lora_scale,
                 num_inference_steps,
                 lora_weights_filename,
                 image_completed,
@@ -215,6 +229,7 @@ def run_inference(
     prompt,
     negative_prompt,
     lora_weights_path,
+    lora_scale,
     num_images,
     batch_size,
     image_size,
@@ -245,7 +260,16 @@ def run_inference(
     )
 
     if interactive:
-        run_inference_gui(pipeline, prompt, negative_prompt, num_images, batch_size, image_size, num_inference_steps)
+        run_inference_gui(
+            pipeline,
+            prompt,
+            negative_prompt,
+            num_images,
+            batch_size,
+            image_size,
+            lora_scale,
+            num_inference_steps,
+        )
     else:
         run_inference_loop(
             pipeline,
@@ -254,6 +278,7 @@ def run_inference(
             num_images,
             batch_size,
             image_size,
+            lora_scale,
             num_inference_steps,
             lora_weights_path,
         )
@@ -449,6 +474,11 @@ if __name__ == "__main__":
         "future, independently of the default weights. Note that constant folding could be added in future onnxruntime"
         "versions, which would make the `initializers` strategy perform as good as `baked`.",
     )
+    parser.add_argument(
+        "--lora_scale",
+        default=1.0,
+        type=float,
+    )
     parser.add_argument("--num_images", default=1, type=int, help="Number of images to generate")
     parser.add_argument("--batch_size", default=1, type=int, help="Number of images to generate per batch")
     parser.add_argument("--num_inference_steps", default=50, type=int, help="Number of steps in diffusion process")
@@ -531,6 +561,7 @@ if __name__ == "__main__":
                 args.prompt,
                 args.negative_prompt,
                 args.lora_weights,
+                args.lora_scale,
                 args.num_images,
                 args.batch_size,
                 config.image_size,
