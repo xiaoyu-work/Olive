@@ -1,0 +1,770 @@
+{
+  "definitions": {
+    "AzureMLClientConfig": {
+      "title": "AzureMLClientConfig",
+      "type": "object",
+      "properties": {
+        "subscription_id": {
+          "title": "Subscription Id",
+          "description": "Azure subscription id. Required if aml_config_path is not provided.",
+          "type": "string"
+        },
+        "resource_group": {
+          "title": "Resource Group",
+          "description": "Azure resource group. Required if aml_config_path is not provided.",
+          "type": "string"
+        },
+        "workspace_name": {
+          "title": "Workspace Name",
+          "description": "Azure workspace name. Required if aml_config_path is not provided.",
+          "type": "string"
+        },
+        "aml_config_path": {
+          "title": "Aml Config Path",
+          "description": "Path to AzureML config file. If provided, other fields are ignored.",
+          "type": "string"
+        },
+        "read_timeout": {
+          "title": "Read Timeout",
+          "description": "Read timeout in seconds for HTTP requests.",
+          "default": 60,
+          "type": "integer"
+        },
+        "max_operation_retries": {
+          "title": "Max Operation Retries",
+          "description": "Max number of retries for AzureML operations like resource creation or download.",
+          "default": 3,
+          "type": "integer"
+        },
+        "operation_retry_interval": {
+          "title": "Operation Retry Interval",
+          "description": "Initial interval in seconds between retries for AzureML operations like resource creation or download. The interval doubles after each retry.",
+          "default": 5,
+          "type": "integer"
+        },
+        "default_auth_params": {
+          "title": "Default Auth Params",
+          "description": "Default auth config for AzureML client. Please refer to https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential?view=azure-python#parameters for more details.",
+          "type": "object"
+        }
+      }
+    },
+    "ModelConfig": {
+      "title": "ModelConfig",
+      "type": "object",
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "title": "Config",
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "config"
+      ]
+    },
+    "SystemType": {
+      "title": "SystemType",
+      "description": "An enumeration.",
+      "enum": [
+        "Docker",
+        "LocalSystem",
+        "AzureML",
+        "PythonEnvironment"
+      ],
+      "type": "string"
+    },
+    "TargetUserConfig": {
+      "title": "TargetUserConfig",
+      "type": "object",
+      "properties": {
+        "accelerators": {
+          "title": "Accelerators",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/SystemType"
+        },
+        "config": {
+          "$ref": "#/definitions/TargetUserConfig"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "DataComponentConfig": {
+      "title": "DataComponentConfig",
+      "type": "object",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "params": {
+          "title": "Params",
+          "type": "object"
+        }
+      }
+    },
+    "DataConfig": {
+      "title": "DataConfig",
+      "type": "object",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "default": "DataContainer",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "default": "DataContainer",
+          "type": "string"
+        },
+        "params_config": {
+          "title": "Params Config",
+          "type": "object"
+        },
+        "user_script": {
+          "title": "User Script",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "path"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "script_dir": {
+          "title": "Script Dir",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "path"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "components": {
+          "title": "Components",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/DataComponentConfig"
+          }
+        },
+        "default_components": {
+          "title": "Default Components",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/DataComponentConfig"
+          }
+        },
+        "default_components_type": {
+          "title": "Default Components Type",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "MetricType": {
+      "title": "MetricType",
+      "description": "An enumeration.",
+      "enum": [
+        "accuracy",
+        "latency",
+        "custom"
+      ],
+      "type": "string"
+    },
+    "AccuracySubType": {
+      "title": "AccuracySubType",
+      "description": "An enumeration.",
+      "enum": [
+        "accuracy_score",
+        "f1_score",
+        "precision",
+        "recall",
+        "auroc",
+        "perplexity"
+      ],
+      "type": "string"
+    },
+    "LatencyMetricConfig": {
+      "title": "LatencyMetricConfig",
+      "type": "object",
+      "properties": {
+        "warmup_num": {
+          "title": "Warmup Num",
+          "default": 10,
+          "type": "integer"
+        },
+        "repeat_test_num": {
+          "title": "Repeat Test Num",
+          "default": 20,
+          "type": "integer"
+        },
+        "sleep_num": {
+          "title": "Sleep Num",
+          "default": 0,
+          "type": "integer"
+        }
+      }
+    },
+    "ConfigBase": {
+      "title": "ConfigBase",
+      "type": "object",
+      "properties": {}
+    },
+    "MetricGoal": {
+      "title": "MetricGoal",
+      "type": "object",
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ]
+    },
+    "SubMetric": {
+      "title": "SubMetric",
+      "type": "object",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AccuracySubType"
+            },
+            {
+              "$ref": "#/definitions/LatencyMetricConfig"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "metric_config": {
+          "$ref": "#/definitions/ConfigBase"
+        },
+        "priority": {
+          "title": "Priority",
+          "default": -1,
+          "type": "integer"
+        },
+        "higher_is_better": {
+          "title": "Higher Is Better",
+          "default": false,
+          "type": "boolean"
+        },
+        "goal": {
+          "$ref": "#/definitions/MetricGoal"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "Metric": {
+      "title": "Metric",
+      "type": "object",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/MetricType"
+        },
+        "backend": {
+          "title": "Backend",
+          "default": "torch_metrics",
+          "type": "string"
+        },
+        "sub_types": {
+          "title": "Sub Types",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SubMetric"
+          }
+        },
+        "user_config": {
+          "$ref": "#/definitions/ConfigBase"
+        },
+        "data_config": {
+          "$ref": "#/definitions/DataConfig"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "sub_types"
+      ]
+    },
+    "OliveEvaluatorConfig": {
+      "title": "OliveEvaluatorConfig",
+      "type": "object",
+      "properties": {
+        "metrics": {
+          "title": "Metrics",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Metric"
+          }
+        }
+      }
+    },
+    "SearchStrategyConfig": {
+      "title": "SearchStrategyConfig",
+      "type": "object",
+      "properties": {
+        "execution_order": {
+          "title": "Execution Order",
+          "type": "string"
+        },
+        "search_algorithm": {
+          "title": "Search Algorithm",
+          "type": "string"
+        },
+        "search_algorithm_config": {
+          "$ref": "#/definitions/ConfigBase"
+        },
+        "output_model_num": {
+          "title": "Output Model Num",
+          "type": "integer"
+        },
+        "stop_when_goals_met": {
+          "title": "Stop When Goals Met",
+          "default": false,
+          "type": "boolean"
+        },
+        "max_iter": {
+          "title": "Max Iter",
+          "type": "integer"
+        },
+        "max_time": {
+          "title": "Max Time",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "execution_order",
+        "search_algorithm"
+      ]
+    },
+    "PackagingType": {
+      "title": "PackagingType",
+      "description": "Output Artifacts type",
+      "enum": [
+        "Zipfile"
+      ],
+      "type": "string"
+    },
+    "PackagingConfig": {
+      "title": "PackagingConfig",
+      "description": "Olive output artifacts generation config",
+      "type": "object",
+      "properties": {
+        "type": {
+          "default": "Zipfile",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PackagingType"
+            }
+          ]
+        },
+        "name": {
+          "title": "Name",
+          "default": "OutputModels",
+          "type": "string"
+        }
+      }
+    },
+    "RunEngineConfig": {
+      "title": "RunEngineConfig",
+      "type": "object",
+      "properties": {
+        "search_strategy": {
+          "title": "Search Strategy",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchStrategyConfig"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "host": {
+          "$ref": "#/definitions/SystemConfig"
+        },
+        "target": {
+          "$ref": "#/definitions/SystemConfig"
+        },
+        "execution_providers": {
+          "title": "Execution Providers",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evaluator": {
+          "$ref": "#/definitions/OliveEvaluatorConfig"
+        },
+        "azureml_client_config": {
+          "$ref": "#/definitions/AzureMLClientConfig"
+        },
+        "packaging_config": {
+          "$ref": "#/definitions/PackagingConfig"
+        },
+        "cache_dir": {
+          "title": "Cache Dir",
+          "default": ".olive-cache",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "path"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "clean_cache": {
+          "title": "Clean Cache",
+          "default": false,
+          "type": "boolean"
+        },
+        "clean_evaluation_cache": {
+          "title": "Clean Evaluation Cache",
+          "default": false,
+          "type": "boolean"
+        },
+        "plot_pareto_frontier": {
+          "title": "Plot Pareto Frontier",
+          "default": false,
+          "type": "boolean"
+        },
+        "evaluate_input_model": {
+          "title": "Evaluate Input Model",
+          "default": true,
+          "type": "boolean"
+        },
+        "output_dir": {
+          "title": "Output Dir",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "path"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "output_name": {
+          "title": "Output Name",
+          "type": "string"
+        },
+        "log_severity_level": {
+          "title": "Log Severity Level",
+          "default": 1,
+          "type": "integer"
+        },
+        "ort_log_severity_level": {
+          "title": "Ort Log Severity Level",
+          "default": 3,
+          "type": "integer"
+        }
+      }
+    },
+    "RunPassConfig": {
+      "title": "RunPassConfig",
+      "type": "object",
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "disable_search": {
+          "title": "Disable Search",
+          "default": false,
+          "type": "boolean"
+        },
+        "accelerator": {
+          "title": "Accelerator",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "config": {
+          "title": "Config",
+          "type": "object"
+        },
+        "host": {
+          "$ref": "#/definitions/SystemConfig"
+        },
+        "evaluator": {
+          "$ref": "#/definitions/OliveEvaluatorConfig"
+        },
+        "clean_run_cache": {
+          "title": "Clean Run Cache",
+          "default": false,
+          "type": "boolean"
+        },
+        "output_name": {
+          "title": "Output Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "RunConfig": {
+      "title": "RunConfig",
+      "type": "object",
+      "properties": {
+        "azureml_client": {
+          "$ref": "#/definitions/AzureMLClientConfig"
+        },
+        "input_model": {
+          "$ref": "#/definitions/ModelConfig"
+        },
+        "systems": {
+          "title": "Systems",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/SystemConfig"
+          }
+        },
+        "data_root": {
+          "title": "Data Root",
+          "type": "string"
+        },
+        "data_configs": {
+          "title": "Data Configs",
+          "default": {
+            "DataContainer": {
+              "name": "DataContainer",
+              "type": "DataContainer",
+              "params_config": {},
+              "user_script": null,
+              "script_dir": null,
+              "components": {
+                "load_dataset": {
+                  "name": "default_load_dataset",
+                  "type": "default_load_dataset",
+                  "params": {
+                    "data_dir": null,
+                    "label_cols": null
+                  }
+                },
+                "pre_process_data": {
+                  "name": "default_pre_process_data",
+                  "type": "default_pre_process_data",
+                  "params": {}
+                },
+                "post_process_data": {
+                  "name": "default_post_process_data",
+                  "type": "default_post_process_data",
+                  "params": {}
+                },
+                "dataloader": {
+                  "name": "default_dataloader",
+                  "type": "default_dataloader",
+                  "params": {
+                    "batch_size": 1
+                  }
+                }
+              },
+              "default_components": {
+                "load_dataset": {
+                  "name": "default_load_dataset",
+                  "type": "default_load_dataset",
+                  "params": {
+                    "data_dir": null,
+                    "label_cols": null
+                  }
+                },
+                "pre_process_data": {
+                  "name": "default_pre_process_data",
+                  "type": "default_pre_process_data",
+                  "params": {}
+                },
+                "post_process_data": {
+                  "name": "default_post_process_data",
+                  "type": "default_post_process_data",
+                  "params": {}
+                },
+                "dataloader": {
+                  "name": "default_dataloader",
+                  "type": "default_dataloader",
+                  "params": {
+                    "batch_size": 1
+                  }
+                }
+              },
+              "default_components_type": {
+                "load_dataset": "default_load_dataset",
+                "pre_process_data": "default_pre_process_data",
+                "post_process_data": "default_post_process_data",
+                "dataloader": "default_dataloader"
+              }
+            },
+            "_default_huggingface_dc": {
+              "name": "_default_huggingface_dc",
+              "type": "HuggingfaceContainer",
+              "params_config": {},
+              "user_script": null,
+              "script_dir": null,
+              "components": {
+                "load_dataset": {
+                  "name": "huggingface_dataset",
+                  "type": "huggingface_dataset",
+                  "params": {
+                    "data_dir": null,
+                    "data_name": null,
+                    "subset": null,
+                    "split": "validation",
+                    "data_files": null
+                  }
+                },
+                "pre_process_data": {
+                  "name": "huggingface_pre_process",
+                  "type": "huggingface_pre_process",
+                  "params": {
+                    "model_name": null,
+                    "input_cols": null,
+                    "label_cols": null,
+                    "max_samples": null
+                  }
+                },
+                "post_process_data": {
+                  "name": "default_post_process_data",
+                  "type": "default_post_process_data",
+                  "params": {}
+                },
+                "dataloader": {
+                  "name": "default_dataloader",
+                  "type": "default_dataloader",
+                  "params": {
+                    "batch_size": 1
+                  }
+                }
+              },
+              "default_components": {
+                "load_dataset": {
+                  "name": "huggingface_dataset",
+                  "type": "huggingface_dataset",
+                  "params": {
+                    "data_dir": null,
+                    "data_name": null,
+                    "subset": null,
+                    "split": "validation",
+                    "data_files": null
+                  }
+                },
+                "pre_process_data": {
+                  "name": "huggingface_pre_process",
+                  "type": "huggingface_pre_process",
+                  "params": {
+                    "model_name": null,
+                    "input_cols": null,
+                    "label_cols": null,
+                    "max_samples": null
+                  }
+                },
+                "post_process_data": {
+                  "name": "default_post_process_data",
+                  "type": "default_post_process_data",
+                  "params": {}
+                },
+                "dataloader": {
+                  "name": "default_dataloader",
+                  "type": "default_dataloader",
+                  "params": {
+                    "batch_size": 1
+                  }
+                }
+              },
+              "default_components_type": {
+                "load_dataset": "huggingface_dataset",
+                "pre_process_data": "huggingface_pre_process",
+                "post_process_data": "default_post_process_data",
+                "dataloader": "default_dataloader"
+              }
+            }
+          },
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/DataConfig"
+          }
+        },
+        "evaluators": {
+          "title": "Evaluators",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/OliveEvaluatorConfig"
+          }
+        },
+        "pass_flows": {
+          "title": "Pass Flows",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "engine": {
+          "$ref": "#/definitions/RunEngineConfig"
+        },
+        "passes": {
+          "title": "Passes",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RunPassConfig"
+          }
+        }
+      },
+      "required": [
+        "input_model",
+        "engine"
+      ]
+    }
+  }
+}

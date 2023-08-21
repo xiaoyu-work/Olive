@@ -1027,6 +1027,7 @@ class Engine:
         Get the path to the evaluation json.
         """
         evaluation_json_path = self._evaluation_cache_path / f"{model_id}.json"
+        Path(evaluation_json_path).parent.mkdir(parents=True, exist_ok=True)
         return evaluation_json_path
 
     def _cache_evaluation(self, model_id: str, signal: MetricResult):
