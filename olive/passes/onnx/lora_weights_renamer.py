@@ -38,30 +38,36 @@ class LoraWeightsRenamer(Fusion):
         mul_nodes = self.model.get_nodes_by_op_type("Mul")
         for mul_node in mul_nodes:
             if mul_node.name.endswith(suffix):
-                initializer = self.model.get_initializer(mul_node.input[1])
-                mul_node.input[1] = "lora_network_alpha_per_rank"
+                initializer = self.model.get_constant_value(mul_node.input[1])
 
-                if not network_alpha_already_added:
-                    # The first Mul node is the network_alpha divided by the rank
-                    new_input = onnx.helper.make_tensor_value_info(
-                        "lora_network_alpha_per_rank", initializer.data_type, initializer.dims
-                    )
-                    self.model.add_input(new_input)
-                    network_alpha_already_added = True
+                if initializer is not None:
+                    mul_node.input[1] = "lora_network_alpha_per_rank"
+
+                    if not network_alpha_already_added:
+                        # The first Mul node is the network_alpha divided by the rank
+                        new_input = onnx.helper.make_tensor_value_info(
+                            "lora_network_alpha_per_rank",
+                            onnx.helper.np_dtype_to_tensor_dtype(initializer.dtype),
+                            initializer.shape,
+                        )
+                        self.model.add_input(new_input)
+                        network_alpha_already_added = True
 
                 # The next node is the LoRA scale
                 next_node = self.model.get_children(mul_node)[0]
 
                 if next_node.op_type == "Mul":
-                    initializer = self.model.get_initializer(next_node.input[1])
-                    next_node.input[1] = "lora_scale"
+                    initializer = self.model.get_constant_value(next_node.input[1])
 
-                    if not lora_scale_already_added:
-                        new_input = onnx.helper.make_tensor_value_info(
-                            "lora_scale", initializer.data_type, initializer.dims
-                        )
-                        self.model.add_input(new_input)
-                        lora_scale_already_added = True
+                    if initializer is not None:
+                        next_node.input[1] = "lora_scale"
+
+                        if not lora_scale_already_added:
+                            new_input = onnx.helper.make_tensor_value_info(
+                                "lora_scale", onnx.helper.np_dtype_to_tensor_dtype(initializer.dtype), initializer.shape
+                            )
+                            self.model.add_input(new_input)
+                            lora_scale_already_added = True
 
     def _rename_unet_weights(self):
         matmul_nodes = self.model.get_nodes_by_op_type("MatMul")

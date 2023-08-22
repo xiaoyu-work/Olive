@@ -39,40 +39,71 @@ class FusionAttentionUnetLora(Fusion):
         self.num_heads_warning = True
         self.hidden_size_warning = True
 
-    def get_num_heads_and_hidden_size(self, reshape_q: NodeProto, layernorm_node: NodeProto) -> Tuple[int, int]:
-        """Detect num_heads and hidden_size from a reshape node.
+    def get_num_heads(self, reshape_q: NodeProto, is_torch2: bool = False) -> int:
+        """Detect num_heads from a reshape node.
 
         Args:
             reshape_q (NodeProto): reshape node for Q
-            add_q (NodeProto): add node for Q
+            is_torch2 (bool): graph pattern is from PyTorch 2.*
+        Returns:
+            int: num_heads, or 0 if not found
+        """
+        num_heads = 0
+        if is_torch2:
+            # we assume that reshape fusion has done, so the shape is a tensor like [0, 0, num_heads, head_size]
+            reshape_parent = self.model.get_parent(reshape_q, 1)
+            if reshape_parent and reshape_parent.op_type == "Concat" and len(reshape_parent.input) == 4:
+                num_heads = self.model.get_constant_value(reshape_parent.input[2])
+                if isinstance(num_heads, np.ndarray) and list(num_heads.shape) == [1]:
+                    num_heads = int(num_heads)
+        else:
+            # we assume that reshape fusion has done, so the shape is a tensor like [0, 0, num_heads, head_size]
+            q_shape_value = self.model.get_constant_value(reshape_q.input[1])
+            if isinstance(q_shape_value, np.ndarray) and list(q_shape_value.shape) == [4]:
+                num_heads = int(q_shape_value[2])
 
+        if isinstance(num_heads, int) and num_heads > 0:
+            return num_heads
+
+        return 0
+
+    def get_hidden_size(self, layernorm_node):
+        """Detect hidden_size from LayerNormalization node.
+        Args:
+            layernorm_node (NodeProto): LayerNormalization node before Q, K and V
+        Returns:
+            int: hidden_size, or 0 if not found
+        """
+        layernorm_bias = self.model.get_initializer(layernorm_node.input[2])
+        if layernorm_bias:
+            return NumpyHelper.to_array(layernorm_bias).shape[0]
+
+        return 0
+
+    def get_num_heads_and_hidden_size(
+        self, reshape_q: NodeProto, layernorm_node: NodeProto, is_torch2: bool = False
+    ) -> Tuple[int, int]:
+        """Detect num_heads and hidden_size.
+
+        Args:
+            reshape_q (NodeProto): reshape node for Q
+            is_torch2 (bool): graph pattern is from PyTorch 2.*
+            layernorm_node (NodeProto): LayerNormalization node before Q, K, V
         Returns:
             Tuple[int, int]: num_heads and hidden_size
         """
-
-        # we assume that reshape fusion has done, so the shape is a tensor like [0, 0, num_heads, head_size]
-        q_shape_value = self.model.get_constant_value(reshape_q.input[1])
-        if q_shape_value is None:
-            logger.debug(f"{reshape_q.input[1]} is not constant.")
-            return self.num_heads, self.hidden_size  # Fall back to user specified value
-
-        if len(q_shape_value) != 4 or q_shape_value[2] <= 0:
-            logger.debug(f"q_shape_value={q_shape_value}. Expected value are like [0, 0, num_heads, -1].")
-            return self.num_heads, self.hidden_size  # Fall back to user specified value
-
-        num_heads = q_shape_value[2]
-
-        layernorm_bias = self.model.get_initializer(layernorm_node.input[1])
-        if layernorm_bias is None:
-            logger.debug(f"{layernorm_node.input[1]} is not initializer.")
-            return self.num_heads, self.hidden_size  # Fall back to user specified value
-
-        hidden_size = NumpyHelper.to_array(layernorm_bias).shape[0]
+        num_heads = self.get_num_heads(reshape_q, is_torch2)
+        if num_heads <= 0:
+            num_heads = self.num_heads  # Fall back to user specified value
 
         if self.num_heads > 0 and num_heads != self.num_heads:
             if self.num_heads_warning:
                 logger.warning(f"--num_heads is {self.num_heads}. Detected value is {num_heads}. Using detected value.")
                 self.num_heads_warning = False  # Do not show the warning more than once
+
+        hidden_size = self.get_hidden_size(layernorm_node)
+        if hidden_size <= 0:
+            hidden_size = self.hidden_size  # Fall back to user specified value
 
         if self.hidden_size > 0 and hidden_size != self.hidden_size:
             if self.hidden_size_warning:
@@ -344,50 +375,6 @@ class FusionAttentionUnetLora(Fusion):
         self.increase_counter(counter_name)
         return attention_node
 
-    def match_lora_path(
-        self,
-        add_node: NodeProto,
-    ):
-        # Lora paths can look like one of the following options:
-        # MatMul -> MatMul -> Add
-        # MatMul -> MatMul -> Mul -> Add
-        # MatMul -> MatMul -> Mul -> Mul -> Add
-
-        # Try matching MatMul -> MatMul -> Add
-        lora_nodes = self.model.match_parent_path(
-            add_node,
-            ["MatMul", "MatMul"],
-            [1, 0],
-        )
-
-        if lora_nodes is not None:
-            (lora_matmul_2_node, lora_matmul_1_node) = lora_nodes
-            return (lora_matmul_2_node, lora_matmul_1_node)
-
-        # Try matching MatMul -> MatMul -> Mul -> Add
-        lora_nodes = self.model.match_parent_path(
-            add_node,
-            ["Mul", "MatMul", "MatMul"],
-            [1, 0, 0],
-        )
-
-        if lora_nodes is not None:
-            (lora_mul_node, _, lora_matmul_1_node) = lora_nodes
-            return (lora_mul_node, lora_matmul_1_node)
-
-        # Try matching MatMul -> MatMul -> Mul -> Mul -> Add
-        lora_nodes = self.model.match_parent_path(
-            add_node,
-            ["Mul", "Mul", "MatMul", "MatMul"],
-            [1, 0, 0, 0],
-        )
-
-        if lora_nodes is not None:
-            (lora_mul_node, _, _, lora_matmul_1_node) = lora_nodes
-            return (lora_mul_node, lora_matmul_1_node)
-
-        return None
-
     def create_attention_node_lora(
         self,
         q_matmul_add: NodeProto,
@@ -413,10 +400,6 @@ class FusionAttentionUnetLora(Fusion):
             Union[NodeProto, None]: the node created or None if failed.
         """
         is_self_attention = not self.is_cross_attention
-
-        # TODO (pavignol): Remove once error is figured out
-        # if not is_self_attention:
-        #     return None
 
         q_matmul = self.model.match_parent(q_matmul_add, "MatMul", 0)
         k_matmul = self.model.match_parent(k_matmul_add, "MatMul", 0)
@@ -670,7 +653,7 @@ class FusionAttentionUnetLora(Fusion):
                 )
                 self.nodes_to_remove.extend([q_matmul, k_matmul, v_matmul, q_matmul_add, k_matmul_add, v_matmul_add])
             else:
-                # TODO (pavignol): Support non-packed QKV
+                # TODO: Support non-packed QKV
                 return None
         else:  # cross attention
             attention_node_name = self.model.create_node_name("MultiHeadAttention")
@@ -813,7 +796,7 @@ class FusionAttentionUnetLora(Fusion):
                 )
                 self.nodes_to_remove.extend([k_matmul, v_matmul, k_matmul_add, v_matmul_add])
             else:
-                # TODO (pavignol): Support non-packed KV
+                # TODO: Support non-packed KV
                 return None
 
         # No bias, use zeros
@@ -830,13 +813,13 @@ class FusionAttentionUnetLora(Fusion):
 
         if is_self_attention:
             if not self.enable_packed_qkv:
-                # TODO (pavignol): Support non-packed QKV
+                # TODO: Support non-packed QKV
                 return None
             else:
                 attention_inputs = [attention_node_name + "_qkv_input"]
         else:
             if not self.enable_packed_kv:
-                # TODO (pavignol): Support non-packed QKV
+                # TODO: Support non-packed QKV
                 return None
             else:
                 attention_inputs = [
@@ -882,126 +865,19 @@ class FusionAttentionUnetLora(Fusion):
         children_nodes = input_name_to_nodes[root_input]
         skip_add = None
         for node in children_nodes:
-            if node.op_type == "Add":  # or node.op_type == "SkipLayerNormalization":
+            if node.op_type == "Add":  # SkipLayerNormalization fusion is not applied yet
                 skip_add = node
                 break
         if skip_add is None:
             return
 
-        another_input = 1 if skip_add.input[0] == root_input else 0
-        qkv_nodes = self.model.match_parent_path(
-            skip_add,
-            ["Add", "MatMul", "Reshape", "Transpose", "Reshape", "MatMul"],
-            [another_input, None, None, 0, 0, 0],
-        )
-
-        if qkv_nodes is None:
-            # Check if we have a LoRA pattern
-            qkv_nodes = self.model.match_parent_path(
-                skip_add,
-                ["Add", "Add", "MatMul", "Reshape", "Transpose", "Reshape", "MatMul"],
-                [another_input, 0, None, None, 0, 0, 0],
-            )
-            if qkv_nodes is None:
-                return
-
-            (_, _, _, reshape_qkv, transpose_qkv, _, matmul_qkv) = qkv_nodes
-
-            # No bias. For cross-attention, the input of the MatMul is encoder_hidden_states graph input.
-            v_nodes = self.model.match_parent_path(matmul_qkv, ["Reshape", "Transpose", "Reshape", "Add"], [1, 0, 0, 0])
-            if v_nodes is None:
-                logger.debug("fuse_attention: failed to match v path")
-                return
-            (_, _, _, matmul_add_v) = v_nodes
-
-            qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Mul", "MatMul"], [0, 0, 0])
-            if qk_nodes is not None:
-                (_softmax_qk, _mul_qk, matmul_qk) = qk_nodes
-            else:
-                qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Add", "Mul", "MatMul"], [0, 0, 0, 0])
-                if qk_nodes is not None:
-                    (_softmax_qk, _add_zero, _mul_qk, matmul_qk) = qk_nodes
-                else:
-                    logger.debug("fuse_attention: failed to match qk path")
-                    return
-
-            q_nodes = self.model.match_parent_path(matmul_qk, ["Reshape", "Transpose", "Reshape", "Add"], [0, 0, 0, 0])
-            if q_nodes is None:
-                logger.debug("fuse_attention: failed to match q path")
-                return
-            (_, _transpose_q, reshape_q, matmul_add_q) = q_nodes
-
-            k_nodes = self.model.match_parent_path(
-                matmul_qk, ["Transpose", "Reshape", "Transpose", "Reshape", "Add"], [1, 0, 0, 0, 0]
-            )
-            if k_nodes is None:
-                logger.debug("fuse_attention: failed to match k path")
-                return
-
-            (_, _, _, _, matmul_add_k) = k_nodes
+        match_qkv = self.match_qkv_torch1(root_input, skip_add) or self.match_qkv_torch2(root_input, skip_add)
+        if match_qkv is not None:
+            is_torch2, reshape_qkv, transpose_qkv, reshape_q, matmul_q, matmul_k, matmul_v = match_qkv
 
             attention_last_node = reshape_qkv
 
-            q_num_heads, q_hidden_size = self.get_num_heads_and_hidden_size(reshape_q, normalize_node)
-            if q_num_heads <= 0:
-                logger.debug("fuse_attention: failed to detect num_heads")
-                return
-
-            # number of heads are same for all the paths, hence to create attention node, we pass the q_num_heads
-            new_node = self.create_attention_node_lora(
-                matmul_add_q,
-                matmul_add_k,
-                matmul_add_v,
-                q_num_heads,
-                q_hidden_size,
-                input=normalize_node.output[0],
-                output=attention_last_node.output[0],
-            )
-            if new_node is None:
-                return
-        else:
-            (_, _, reshape_qkv, transpose_qkv, _, matmul_qkv) = qkv_nodes
-
-            # No bias. For cross-attention, the input of the MatMul is encoder_hidden_states graph input.
-            v_nodes = self.model.match_parent_path(
-                matmul_qkv, ["Reshape", "Transpose", "Reshape", "MatMul"], [1, 0, 0, 0]
-            )
-            if v_nodes is None:
-                logger.debug("fuse_attention: failed to match v path")
-                return
-            (_, _, _, matmul_v) = v_nodes
-
-            qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Mul", "MatMul"], [0, 0, 0])
-            if qk_nodes is not None:
-                (_softmax_qk, _mul_qk, matmul_qk) = qk_nodes
-            else:
-                qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Add", "Mul", "MatMul"], [0, 0, 0, 0])
-                if qk_nodes is not None:
-                    (_softmax_qk, _add_zero, _mul_qk, matmul_qk) = qk_nodes
-                else:
-                    logger.debug("fuse_attention: failed to match qk path")
-                    return
-
-            q_nodes = self.model.match_parent_path(
-                matmul_qk, ["Reshape", "Transpose", "Reshape", "MatMul"], [0, 0, 0, 0]
-            )
-            if q_nodes is None:
-                logger.debug("fuse_attention: failed to match q path")
-                return
-            (_, _transpose_q, reshape_q, matmul_q) = q_nodes
-
-            k_nodes = self.model.match_parent_path(
-                matmul_qk, ["Transpose", "Reshape", "Transpose", "Reshape", "MatMul"], [1, 0, 0, 0, 0]
-            )
-            if k_nodes is None:
-                logger.debug("fuse_attention: failed to match k path")
-                return
-
-            (_, _, _, _, matmul_k) = k_nodes
-
-            attention_last_node = reshape_qkv
-
-            q_num_heads, q_hidden_size = self.get_num_heads_and_hidden_size(reshape_q, normalize_node)
+            q_num_heads, q_hidden_size = self.get_num_heads_and_hidden_size(reshape_q, normalize_node, is_torch2)
             if q_num_heads <= 0:
                 logger.debug("fuse_attention: failed to detect num_heads")
                 return
@@ -1018,6 +894,40 @@ class FusionAttentionUnetLora(Fusion):
             )
             if new_node is None:
                 return
+        else:
+            # Check if we have a LoRA pattern
+            match_qkv = self.match_qkv_torch1_lora(root_input, skip_add) or self.match_qkv_torch2_lora(
+                root_input, skip_add
+            )
+            if match_qkv is None:
+                return
+
+            is_torch2, reshape_qkv, transpose_qkv, reshape_q, matmul_add_q, matmul_add_k, matmul_add_v = match_qkv
+
+            attention_last_node = reshape_qkv
+
+            q_num_heads, q_hidden_size = self.get_num_heads_and_hidden_size(reshape_q, normalize_node, is_torch2)
+            if q_num_heads <= 0:
+                logger.debug("fuse_attention: failed to detect num_heads")
+                return
+
+            # number of heads are same for all the paths, hence to create attention node, we pass the q_num_heads
+            new_node = self.create_attention_node_lora(
+                matmul_add_q,
+                matmul_add_k,
+                matmul_add_v,
+                q_num_heads,
+                q_hidden_size,
+                input=normalize_node.output[0],
+                output=attention_last_node.output[0],
+            )
+            if new_node is None:
+                return
+
+            q_num_heads, q_hidden_size = self.get_num_heads_and_hidden_size(reshape_q, normalize_node, is_torch2)
+            if q_num_heads <= 0:
+                logger.debug("fuse_attention: failed to detect num_heads")
+                return
 
         self.nodes_to_add.append(new_node)
         self.node_name_to_graph_name[new_node.name] = self.this_graph_name
@@ -1026,3 +936,247 @@ class FusionAttentionUnetLora(Fusion):
 
         # Use prune graph to remove nodes since they are shared by all attention nodes.
         self.prune_graph = True
+
+    def match_qkv_torch1(self, root_input, skip_add):
+        """Match Q, K and V paths exported by PyTorch 1.*"""
+        another_input = 1 if skip_add.input[0] == root_input else 0
+        qkv_nodes = self.model.match_parent_path(
+            skip_add,
+            ["Add", "MatMul", "Reshape", "Transpose", "Reshape", "MatMul"],
+            [another_input, None, None, 0, 0, 0],
+        )
+
+        if qkv_nodes is None:
+            return None
+
+        (_, _, reshape_qkv, transpose_qkv, _, matmul_qkv) = qkv_nodes
+
+        # No bias. For cross-attention, the input of the MatMul is encoder_hidden_states graph input.
+        v_nodes = self.model.match_parent_path(matmul_qkv, ["Reshape", "Transpose", "Reshape", "MatMul"], [1, 0, 0, 0])
+        if v_nodes is None:
+            logger.debug("fuse_attention: failed to match v path")
+            return None
+        (_, _, _, matmul_v) = v_nodes
+
+        qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Mul", "MatMul"], [0, 0, 0])
+        if qk_nodes is not None:
+            (_softmax_qk, _mul_qk, matmul_qk) = qk_nodes
+        else:
+            qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Add", "Mul", "MatMul"], [0, 0, 0, 0])
+            if qk_nodes is not None:
+                (_softmax_qk, _add_zero, _mul_qk, matmul_qk) = qk_nodes
+            else:
+                logger.debug("fuse_attention: failed to match qk path")
+                return None
+
+        q_nodes = self.model.match_parent_path(matmul_qk, ["Reshape", "Transpose", "Reshape", "MatMul"], [0, 0, 0, 0])
+        if q_nodes is None:
+            logger.debug("fuse_attention: failed to match q path")
+            return None
+        (_, _transpose_q, reshape_q, matmul_q) = q_nodes
+
+        k_nodes = self.model.match_parent_path(
+            matmul_qk, ["Transpose", "Reshape", "Transpose", "Reshape", "MatMul"], [1, 0, 0, 0, 0]
+        )
+        if k_nodes is None:
+            logger.debug("fuse_attention: failed to match k path")
+            return None
+
+        (_, _, _, _, matmul_k) = k_nodes
+
+        return False, reshape_qkv, transpose_qkv, reshape_q, matmul_q, matmul_k, matmul_v
+
+    def match_qkv_torch2(self, root_input, skip_add):
+        """Match Q, K and V paths exported by PyTorch 2.*"""
+        another_input = 1 if skip_add.input[0] == root_input else 0
+        qkv_nodes = self.model.match_parent_path(
+            skip_add,
+            ["Add", "MatMul", "Reshape", "Transpose", "MatMul"],
+            [another_input, None, None, 0, 0],
+        )
+
+        if qkv_nodes is None:
+            return None
+
+        (_, _, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
+
+        v_nodes = self.model.match_parent_path(matmul_qkv, ["Transpose", "Reshape", "MatMul"], [1, 0, 0])
+        if v_nodes is None:
+            logger.debug("fuse_attention: failed to match v path")
+            return None
+        (_, _, matmul_v) = v_nodes
+
+        qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "MatMul"], [0, 0])
+        if qk_nodes is not None:
+            (_softmax_qk, matmul_qk) = qk_nodes
+        else:
+            logger.debug("fuse_attention: failed to match qk path")
+            return None
+
+        q_nodes = self.model.match_parent_path(matmul_qk, ["Mul", "Transpose", "Reshape", "MatMul"], [0, None, 0, 0])
+        if q_nodes is None:
+            logger.debug("fuse_attention: failed to match q path")
+            return None
+        (mul_q, _transpose_q, reshape_q, matmul_q) = q_nodes
+
+        k_nodes = self.model.match_parent_path(matmul_qk, ["Mul", "Transpose", "Reshape", "MatMul"], [1, None, 0, 0])
+        if k_nodes is None:
+            logger.debug("fuse_attention: failed to match k path")
+            return None
+
+        (_mul_k, _, _, matmul_k) = k_nodes
+
+        # The scalar for Q and K is sqrt(1.0/sqrt(head_size)).
+        mul_q_nodes = self.model.match_parent_path(
+            mul_q,
+            ["Sqrt", "Div", "Sqrt", "Cast", "Slice", "Shape", "Transpose", "Reshape"],
+            [None, 0, 1, 0, 0, 0, 0, 0],
+        )
+        if mul_q_nodes is None or mul_q_nodes[-1] != reshape_q:
+            logger.debug("fuse_attention: failed to match mul_q path")
+            return None
+
+        return True, reshape_qkv, transpose_qkv, reshape_q, matmul_q, matmul_k, matmul_v
+
+    def match_qkv_torch1_lora(self, root_input, skip_add):
+        """Match Q, K and V paths exported by PyTorch 1 that contains LoRA patterns.*"""
+        another_input = 1 if skip_add.input[0] == root_input else 0
+        qkv_nodes = self.model.match_parent_path(
+            skip_add,
+            ["Add", "Add", "MatMul", "Reshape", "Transpose", "Reshape", "MatMul"],
+            [another_input, 0, None, None, 0, 0, 0],
+        )
+        if qkv_nodes is None:
+            return
+
+        (_, _, _, reshape_qkv, transpose_qkv, _, matmul_qkv) = qkv_nodes
+
+        # No bias. For cross-attention, the input of the MatMul is encoder_hidden_states graph input.
+        v_nodes = self.model.match_parent_path(matmul_qkv, ["Reshape", "Transpose", "Reshape", "Add"], [1, 0, 0, 0])
+        if v_nodes is None:
+            logger.debug("fuse_attention: failed to match LoRA v path")
+            return
+        (_, _, _, matmul_add_v) = v_nodes
+
+        qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Mul", "MatMul"], [0, 0, 0])
+        if qk_nodes is not None:
+            (_softmax_qk, _mul_qk, matmul_qk) = qk_nodes
+        else:
+            qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "Add", "Mul", "MatMul"], [0, 0, 0, 0])
+            if qk_nodes is not None:
+                (_softmax_qk, _add_zero, _mul_qk, matmul_qk) = qk_nodes
+            else:
+                logger.debug("fuse_attention: failed to match LoRA qk path")
+                return
+
+        q_nodes = self.model.match_parent_path(matmul_qk, ["Reshape", "Transpose", "Reshape", "Add"], [0, 0, 0, 0])
+        if q_nodes is None:
+            logger.debug("fuse_attention: failed to match LoRA q path")
+            return
+        (_, _transpose_q, reshape_q, matmul_add_q) = q_nodes
+
+        k_nodes = self.model.match_parent_path(
+            matmul_qk, ["Transpose", "Reshape", "Transpose", "Reshape", "Add"], [1, 0, 0, 0, 0]
+        )
+        if k_nodes is None:
+            logger.debug("fuse_attention: failed to match LoRA k path")
+            return
+
+        (_, _, _, _, matmul_add_k) = k_nodes
+
+        return False, reshape_qkv, transpose_qkv, reshape_q, matmul_add_q, matmul_add_k, matmul_add_v
+
+    def match_qkv_torch2_lora(self, root_input, skip_add):
+        """Match Q, K and V paths exported by PyTorch 2 that contains LoRA patterns.*"""
+        another_input = 1 if skip_add.input[0] == root_input else 0
+        qkv_nodes = self.model.match_parent_path(
+            skip_add,
+            ["Add", "Add", "MatMul", "Reshape", "Transpose", "MatMul"],
+            [another_input, 0, None, None, 0, 0],
+        )
+        if qkv_nodes is None:
+            return None
+
+        (_, _, _, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
+
+        v_nodes = self.model.match_parent_path(matmul_qkv, ["Transpose", "Reshape", "Add"], [1, 0, 0])
+        if v_nodes is None:
+            logger.debug("fuse_attention: failed to match LoRA v path")
+            return None
+        (_, _, matmul_add_v) = v_nodes
+
+        qk_nodes = self.model.match_parent_path(matmul_qkv, ["Softmax", "MatMul"], [0, 0])
+        if qk_nodes is not None:
+            (_softmax_qk, matmul_qk) = qk_nodes
+        else:
+            logger.debug("fuse_attention: failed to match LoRA qk path")
+            return None
+
+        q_nodes = self.model.match_parent_path(matmul_qk, ["Mul", "Transpose", "Reshape", "Add"], [0, None, 0, 0])
+        if q_nodes is None:
+            logger.debug("fuse_attention: failed to match LoRA q path")
+            return None
+        (mul_q, _transpose_q, reshape_q, matmul_add_q) = q_nodes
+
+        k_nodes = self.model.match_parent_path(matmul_qk, ["Mul", "Transpose", "Reshape", "Add"], [1, None, 0, 0])
+        if k_nodes is None:
+            logger.debug("fuse_attention: failed to match LoRA k path")
+            return None
+
+        (_mul_k, _, _, matmul_add_k) = k_nodes
+
+        # The scalar for Q and K is sqrt(1.0/sqrt(head_size)).
+        mul_q_nodes = self.model.match_parent_path(
+            mul_q,
+            ["Sqrt", "Div", "Sqrt", "Cast", "Slice", "Shape", "Transpose", "Reshape"],
+            [None, 0, 1, 0, 0, 0, 0, 0],
+        )
+        if mul_q_nodes is None or mul_q_nodes[-1] != reshape_q:
+            logger.debug("fuse_attention: failed to match LoRA mul_q path")
+            return None
+
+        return True, reshape_qkv, transpose_qkv, reshape_q, matmul_add_q, matmul_add_k, matmul_add_v
+
+    def match_lora_path(
+        self,
+        add_node: NodeProto,
+    ):
+        # Lora paths can look like one of the following options:
+        # MatMul -> MatMul -> Add
+        # MatMul -> MatMul -> Mul -> Add
+        # MatMul -> MatMul -> Mul -> Mul -> Add
+
+        # Try matching MatMul -> MatMul -> Add
+        lora_nodes = self.model.match_parent_path(
+            add_node,
+            ["MatMul", "MatMul"],
+            [1, 0],
+        )
+
+        if lora_nodes is not None:
+            (lora_matmul_2_node, lora_matmul_1_node) = lora_nodes
+            return (lora_matmul_2_node, lora_matmul_1_node)
+
+        # Try matching MatMul -> MatMul -> Mul -> Add
+        lora_nodes = self.model.match_parent_path(
+            add_node,
+            ["Mul", "MatMul", "MatMul"],
+            [1, 0, 0],
+        )
+
+        if lora_nodes is not None:
+            (lora_mul_node, _, lora_matmul_1_node) = lora_nodes
+            return (lora_mul_node, lora_matmul_1_node)
+
+        # Try matching MatMul -> MatMul -> Mul -> Mul -> Add
+        lora_nodes = self.model.match_parent_path(
+            add_node,
+            ["Mul", "Mul", "MatMul", "MatMul"],
+            [1, 0, 0, 0],
+        )
+
+        if lora_nodes is not None:
+            (lora_mul_node, _, _, lora_matmul_1_node) = lora_nodes
+            return (lora_mul_node, lora_matmul_1_node)
+
+        return None
