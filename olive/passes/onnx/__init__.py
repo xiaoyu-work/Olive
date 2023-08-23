@@ -13,7 +13,12 @@ from olive.passes.onnx.moe_experts_distributor import MoEExpertsDistributor
 from olive.passes.onnx.optimum_conversion import OptimumConversion
 from olive.passes.onnx.optimum_merging import OptimumMerging
 from olive.passes.onnx.perf_tuning import OrtPerfTuning
-from olive.passes.onnx.quantization import OnnxDynamicQuantization, OnnxQuantization, OnnxStaticQuantization
+from olive.passes.onnx.quantization import (
+    OnnxDynamicQuantization,
+    OnnxMatMulWeight4Quantizer,
+    OnnxQuantization,
+    OnnxStaticQuantization,
+)
 from olive.passes.onnx.transformer_optimization import OrtTransformersOptimization
 from olive.passes.onnx.vitis_ai_quantization import VitisAIQuantization
 
@@ -24,6 +29,7 @@ __all__ = [
     "OnnxDynamicQuantization",
     "OnnxQuantization",
     "OnnxStaticQuantization",
+    "OnnxMatMulWeight4Quantizer",
     "IncDynamicQuantization",
     "IncQuantization",
     "IncStaticQuantization",

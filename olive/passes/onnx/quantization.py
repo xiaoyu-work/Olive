@@ -493,3 +493,53 @@ class OnnxStaticQuantization(OnnxQuantization):
         # external data config
         config.update(get_external_data_config())
         return config
+
+
+class OnnxMatMulWeight4Quantizer(Pass):
+    @staticmethod
+    def _default_config(accelerator_spec: AcceleratorSpec) -> Dict[str, PassConfigParam]:
+        config = {
+            "quant_type": PassConfigParam(
+                type_=int,
+                default_value=0,
+                description=(
+                    "0: BlkQ4Sym-32 number block, symmetric quantization, with one fp32 as scale, zero point is 0 "
+                    "1: BlkQ4Zp8-32 number block, quantization, with one fp32 as scale, one uint8 zero point "
+                ),
+            ),
+            "quant_bin_path": PassConfigParam(
+                type_=str,
+                default_value="",
+                required=True,
+                description=(
+                    "Currently quantization code is implemented in a separate binary"
+                    "(onnxruntime_mlas_q4dq) that is compiled with Onnxruntime native code."
+                    "Path to this binary needs to be provided here."
+                ),
+            ),
+        }
+        config.update(get_external_data_config())
+        return config
+
+    def _run_for_config(
+        self, model: ONNXModel, data_root: str, config: Dict[str, Any], output_model_path: str
+    ) -> ONNXModel:
+        from onnxruntime import __version__ as OrtVersion
+
+        if version.parse(OrtVersion) < version.parse("1.16.0"):
+            raise OlivePassException("MatMulWeight4Quantizer is only supported in onnxruntime >= 1.16.0")
+
+        from onnxruntime.quantization.matmul_weight4_quantizer import MatMulWeight4Quantizer
+        from onnxruntime.quantization.quant_utils import load_model_with_shape_infer
+
+        model_with_shape_infer = load_model_with_shape_infer(Path(model.model_path))
+        quant = MatMulWeight4Quantizer(model_with_shape_infer, config["quant_type"])
+        quant.process()
+        new_tmp_dir = tempfile.TemporaryDirectory(prefix="olive_tmp")
+        tmp_model_path = str(Path(new_tmp_dir.name) / Path(output_model_path).name)
+        quant.model.save_model_to_file(tmp_model_path, config["save_as_external_data"])
+
+        # load the model
+        onnx_model = onnx.load(tmp_model_path)
+        new_tmp_dir.cleanup()
+        return model_proto_to_olive_model(onnx_model, output_model_path, config)
