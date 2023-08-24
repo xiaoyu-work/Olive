@@ -28,6 +28,24 @@ from olive.model import ONNXModel
 from olive.workflows import run as olive_run
 
 
+def read_lora_weights(lora_weights_filename):
+    if lora_weights_filename.endswith(".bin"):
+        lora_weights = torch.load(lora_weights_filename, map_location="cpu", weights_only=True)
+    elif lora_weights_filename.endswith(".safetensors"):
+        lora_weights = load_file(lora_weights_filename)
+
+    alpha = None
+
+    if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
+        lora_weights, alpha = convert_kohya_lora_to_diffusers(lora_weights)
+
+    rank = lora_weights[
+        "unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.processor.to_k_lora.down.weight"
+    ].shape[0]
+
+    return lora_weights, alpha, rank
+
+
 def run_inference_loop(
     pipeline,
     prompt,
@@ -47,19 +65,9 @@ def run_inference_loop(
     text_encoder_additional_inputs = {}
 
     if lora_weights_filename is not None:
-        if lora_weights_filename.endswith(".bin"):
-            lora_weights = torch.load(lora_weights_filename, map_location="cpu", weights_only=True)
-        elif lora_weights_filename.endswith(".safetensors"):
-            lora_weights = load_file(lora_weights_filename)
+        lora_weights, alpha, rank = read_lora_weights(lora_weights_filename)
 
-        if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
-            lora_weights, alpha = convert_kohya_lora_to_diffusers(lora_weights)
-
-            rank = lora_weights[
-                "unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.processor.to_k_lora.down.weight"
-            ].shape[0]
-            print(f"rank: {rank}")
-
+        if alpha is not None:
             unet_additional_inputs["lora_network_alpha_per_rank"] = np.array(alpha / rank, dtype=np.float16)
             text_encoder_additional_inputs["lora_network_alpha_per_rank"] = np.array(alpha / rank, dtype=np.float16)
 
@@ -254,6 +262,12 @@ def run_inference(
         sess_options.add_free_dimension_override_by_name("unet_time_batch", 1)
         sess_options.add_free_dimension_override_by_name("unet_hidden_batch", batch_size * 2)
         sess_options.add_free_dimension_override_by_name("unet_hidden_sequence", 77)
+
+        if lora_weights_path is None:
+            rank = 1
+        else:
+            _, _, rank = read_lora_weights(lora_weights_path)
+            sess_options.add_free_dimension_override_by_name("lora_rank", rank)
 
     pipeline = OnnxStableDiffusionPipeline.from_pretrained(
         optimized_model_dir, provider="DmlExecutionProvider", sess_options=sess_options
