@@ -5,4 +5,4 @@
 
 image_size = 512
 lora_weights_file = None
-lora_weights_strategy = "input_binding"
+lora_weights_strategy = None

@@ -19,6 +19,9 @@ import onnxruntime as ort
 import torch
 from diffusers import DiffusionPipeline, OnnxRuntimeModel, OnnxStableDiffusionPipeline, StableDiffusionPipeline
 from lora_weights_conversion import convert_kohya_lora_to_diffusers
+from lora_weights_renamer import LoraWeightsRenamer
+from onnx import load_model, save_model
+from onnxruntime.transformers.onnx_model import OnnxModel
 from packaging import version
 from PIL import Image, ImageTk
 from safetensors.numpy import load_file
@@ -34,7 +37,7 @@ def read_lora_weights(lora_weights_filename):
     elif lora_weights_filename.endswith(".safetensors"):
         lora_weights = load_file(lora_weights_filename)
 
-    alpha = None
+    alpha = 1.0
 
     if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
         lora_weights, alpha = convert_kohya_lora_to_diffusers(lora_weights)
@@ -53,43 +56,11 @@ def run_inference_loop(
     num_images,
     batch_size,
     image_size,
-    lora_scale,
     num_inference_steps,
-    lora_weights_filename=None,
     image_callback=None,
     step_callback=None,
 ):
     images_saved = 0
-
-    unet_additional_inputs = {}
-    text_encoder_additional_inputs = {}
-
-    if lora_weights_filename is not None:
-        lora_weights, alpha, rank = read_lora_weights(lora_weights_filename)
-
-        if alpha is not None:
-            unet_additional_inputs["lora_network_alpha_per_rank"] = np.array(alpha / rank, dtype=np.float16)
-            text_encoder_additional_inputs["lora_network_alpha_per_rank"] = np.array(alpha / rank, dtype=np.float16)
-
-        for weight_name, weight_value in lora_weights.items():
-            if "lora" not in weight_name:
-                continue
-
-            if isinstance(weight_value, torch.Tensor):
-                weight_value = weight_value.numpy()
-
-            new_values = np.transpose(weight_value.astype(np.float16))
-
-            if weight_name.startswith("unet."):
-                unet_additional_inputs[weight_name] = new_values
-            elif weight_name.startswith("text_encoder."):
-                text_encoder_additional_inputs[weight_name] = new_values
-
-        if len(unet_additional_inputs) > 0:
-            unet_additional_inputs["lora_scale"] = np.array(lora_scale, dtype=np.float16)
-
-        if len(text_encoder_additional_inputs) > 0:
-            text_encoder_additional_inputs["lora_scale"] = np.array(lora_scale, dtype=np.float16)
 
     def update_steps(step, timestep, latents):
         if step_callback:
@@ -99,8 +70,6 @@ def run_inference_loop(
         print(f"\nInference Batch Start (batch size = {batch_size}).")
         result = pipeline(
             [prompt] * batch_size,
-            unet_additional_inputs=unet_additional_inputs,
-            text_encoder_additional_inputs=text_encoder_additional_inputs,
             negative_prompt=[negative_prompt] * batch_size,
             num_inference_steps=num_inference_steps,
             callback=update_steps if step_callback else None,
@@ -130,7 +99,6 @@ def run_inference_gui(
     num_images,
     batch_size,
     image_size,
-    lora_scale,
     num_inference_steps,
 ):
     def update_progress_bar(total_steps_completed):
@@ -158,9 +126,7 @@ def run_inference_gui(
                 num_images,
                 batch_size,
                 image_size,
-                lora_scale,
                 num_inference_steps,
-                lora_weights_filename,
                 image_completed,
                 update_progress_bar,
             ),
@@ -251,6 +217,26 @@ def run_inference(
     sess_options = ort.SessionOptions()
     sess_options.enable_mem_pattern = False
 
+    if lora_weights_path is not None:
+        lora_weights, alpha, rank = read_lora_weights(lora_weights_path)
+        sess_options.add_initializer("lora_network_alpha_per_rank", np.array(alpha / rank, dtype=np.float16))
+
+        for weight_name, weight_value in lora_weights.items():
+            if "lora" not in weight_name:
+                continue
+
+            if isinstance(weight_value, torch.Tensor):
+                weight_value = weight_value.numpy()
+
+            new_values = np.transpose(weight_value.astype(np.float16))
+
+            if weight_name.startswith("unet."):
+                sess_options.add_initializer(weight_name, new_values)
+            elif weight_name.startswith("text_encoder."):
+                sess_options.add_initializer(weight_name, new_values)
+
+        sess_options.add_initializer("lora_scale", np.array(lora_scale, dtype=np.float16))
+
     if static_dims:
         # Not necessary, but helps DML EP further optimize runtime performance.
         # batch_size is doubled for sample & hidden state because of classifier free guidance:
@@ -262,12 +248,6 @@ def run_inference(
         sess_options.add_free_dimension_override_by_name("unet_time_batch", 1)
         sess_options.add_free_dimension_override_by_name("unet_hidden_batch", batch_size * 2)
         sess_options.add_free_dimension_override_by_name("unet_hidden_sequence", 77)
-
-        if lora_weights_path is None:
-            rank = 1
-        else:
-            _, _, rank = read_lora_weights(lora_weights_path)
-            sess_options.add_free_dimension_override_by_name("lora_rank", rank)
 
     pipeline = OnnxStableDiffusionPipeline.from_pretrained(
         optimized_model_dir, provider="DmlExecutionProvider", sess_options=sess_options
@@ -281,7 +261,6 @@ def run_inference(
             num_images,
             batch_size,
             image_size,
-            lora_scale,
             num_inference_steps,
         )
     else:
@@ -292,9 +271,7 @@ def run_inference(
             num_images,
             batch_size,
             image_size,
-            lora_scale,
             num_inference_steps,
-            lora_weights_path,
         )
 
 
@@ -302,7 +279,6 @@ def optimize(
     model_id: str,
     unoptimized_model_dir: Path,
     optimized_model_dir: Path,
-    lora_weights_strategy: str,
 ):
     from google.protobuf import __version__ as protobuf_version
 
@@ -359,9 +335,6 @@ def optimize(
 
         if submodel_name in ("unet", "text_encoder"):
             olive_config["input_model"]["config"]["model_path"] = model_id
-            olive_config["passes"]["optimize"]["config"]["optimization_options"][
-                "lora_weights_strategy"
-            ] = lora_weights_strategy
         else:
             # Only the unet & text encoder are affected by LoRA, so it's better to use the base model ID for
             # other models: the Olive cache is based on the JSON config, and two LoRA variants with the same
@@ -388,6 +361,17 @@ def optimize(
 
             unoptimized_olive_model = ONNXModel(**conversion_footprint["model_config"]["config"])
             optimized_olive_model = ONNXModel(**optimizer_footprint["model_config"]["config"])
+
+            # LoRA support is still in the experimentation phase, so we do this post-processing over here
+            if (
+                config.lora_weights_strategy == "inserted"
+                and submodel_name == "unet"
+                or submodel_name == "text_encoder"
+            ):
+                base_model = OnnxModel(load_model(optimized_olive_model.model_path))
+                lora_weights_renamer = LoraWeightsRenamer(base_model, submodel_name)
+                lora_weights_renamer.apply()
+                save_model(base_model.model, optimized_olive_model.model_path)
 
             model_info[submodel_name] = {
                 "unoptimized": {
@@ -475,18 +459,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--lora_weights_strategy",
-        choices=["input_binding", "baked", "initializers"],
-        default="input_binding",
+        choices=["inserted", "folded"],
+        default=None,
         type=str,
-        help="Strategy to use when adding the LoRA weights. `input_binding` means that the weights will need to bound "
-        "as inputs, at runtime. Doing so can reduce performance but adds the flexibility of changing the weights "
-        "on the fly without reoptimizing or reloading the model. `baked` means that the weights will be completely "
+        help="Strategy to use when adding the LoRA weights. `folded` means that the weights will be completely "
         "merged with the original model's weights. Doing so can improve performance but makes it impossible "
-        "to change the weights after the model has been optimized. `initializers` means that the weights will be "
-        "inserted in the model as external initializers. This strategy has a worse performance than `baked` due to "
+        "to change the weights after the model has been optimized. `inserted` means that the weights will be "
+        "inserted in the model as initializers. This strategy has worse performance than `folded` due to "
         "the additional GEMM operations, but adds the flexibility of being able to update the LoRA weights in the "
-        "future, independently of the default weights. Note that constant folding could be added in future onnxruntime"
-        "versions, which would make the `initializers` strategy perform as good as `baked`.",
+        "at session creation, independently of the default weights. Note that graph optimizations could be leveraged "
+        "in onnxruntime to fold the inserted weights at runtime and therefore make the `inserted` option's performance "
+        "similar to the `baked` option.",
     )
     parser.add_argument(
         "--lora_scale",
@@ -554,7 +537,7 @@ if __name__ == "__main__":
         # TODO: clean up warning filter (mostly during conversion from torch to ONNX)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            optimize(args.model_id, unoptimized_model_dir, optimized_model_dir, args.lora_weights_strategy)
+            optimize(args.model_id, unoptimized_model_dir, optimized_model_dir)
 
     xl_models = [
         "stabilityai/stable-diffusion-xl-refiner-0.9",

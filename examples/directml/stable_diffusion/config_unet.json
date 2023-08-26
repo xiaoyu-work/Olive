@@ -64,7 +64,6 @@
                     "enable_layer_norm": true,
                     "enable_attention": true,
                     "use_multi_head_attention": true,
-                    "use_lora_multi_head_attention": true,
                     "enable_skip_layer_norm": false,
                     "enable_embed_layer_norm": true,
                     "enable_bias_skip_layer_norm": false,
@@ -78,9 +77,7 @@
                     "enable_bias_splitgelu": false,
                     "enable_packed_qkv": true,
                     "enable_packed_kv": true,
-                    "enable_bias_add": false,
-                    "lora_weights_strategy": "input_binding",
-                    "lora_weights_prefix": "unet"
+                    "enable_bias_add": false
                 },
                 "force_fp32_ops": ["RandomNormalLike"]
             }

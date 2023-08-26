@@ -7,10 +7,6 @@ import os
 from copy import deepcopy
 from typing import Any, Dict, List, Union
 
-import numpy as np
-import onnx.helper
-import onnx.numpy_helper
-
 from olive.hardware.accelerator import AcceleratorSpec, Device
 from olive.model import ONNXModel
 from olive.passes import Pass
@@ -101,6 +97,23 @@ class OrtTransformersOptimization(Pass):
         if search_point.get("use_gpu") and accelerator_spec.execution_provider == "CPUExecutionProvider":
             logger.info("CPUExecutionProvider does not support GPU inference, please avoid to use use_gpu.")
             return False
+        if search_point.get("only_onnxruntime") and search_point.get("opt_level") <= 0:
+            logger.info("Please specify a positive value for opt_level when only_onnxruntime is True")
+            return False
+        if (
+            search_point.get("opt_level") == 0
+            and search_point.get("only_onnxruntime")
+            and search_point.get("num_heads") == 0
+            and search_point.get("hidden_size") == 0
+        ):
+            from onnxruntime import __version__ as OrtVersion
+            from packaging import version
+
+            if version.parse(OrtVersion) <= version.parse("1.16.0"):
+                logger.info(
+                    "Ignore this search point because the issue https://github.com/microsoft/onnxruntime/issues/17254"
+                )
+            return False
         return True
 
     @staticmethod
@@ -129,74 +142,10 @@ class OrtTransformersOptimization(Pass):
 
         output_model_path = ONNXModel.resolve_path(os.path.join(output_model_path, os.path.basename(model.model_path)))
 
-        optimization_options = config["optimization_options"]
-        if optimization_options:
+        if config["optimization_options"]:
             self._set_fusion_options(run_config)
 
         optimizer = transformers_optimizer.optimize_model(input=model.model_path, **run_config)
-
-        # TODO: Remove once this is merged into ORT's fusion_attention_unet.py script
-        if optimization_options and optimization_options.get("use_lora_multi_head_attention", False):
-            from onnxruntime.transformers.onnx_model_bert import BertOnnxModel
-
-            from olive.passes.onnx.fusion_attention_unet_lora import FusionAttentionUnetLora
-
-            # The model type doesn't matter here, so get the base model
-            base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
-
-            # Self Attention
-            self_attention_fusion = FusionAttentionUnetLora(
-                base_model, base_model.hidden_size, base_model.num_heads, False, True, False
-            )
-            self_attention_fusion.apply()
-
-            # Cross Attention
-            cross_attention_fusion = FusionAttentionUnetLora(
-                base_model, base_model.hidden_size, base_model.num_heads, True, False, True
-            )
-            cross_attention_fusion.apply()
-
-        if optimization_options:
-            from onnxruntime.transformers.onnx_model_bert import BertOnnxModel
-
-            from olive.passes.onnx.lora_weights_renamer import LoraWeightsRenamer
-
-            lora_weights_strategy = optimization_options.get("lora_weights_strategy", "baked")
-            lora_weights_prefix = optimization_options.get("lora_weights_prefix", "")
-
-            if lora_weights_strategy != "baked":
-                # The model type doesn't matter here, so get the base model
-                base_model = BertOnnxModel(optimizer.model, run_config["num_heads"], run_config["hidden_size"])
-                lora_weights_renamer = LoraWeightsRenamer(
-                    base_model, lora_weights_strategy == "input_binding", lora_weights_prefix
-                )
-                lora_weights_renamer.apply()
-
-                if lora_weights_strategy == "input_binding":
-                    for graph_input in optimizer.model.graph.input:
-                        if graph_input.name.endswith("lora.up.weight"):
-                            graph_input.type.tensor_type.shape.dim[0].ClearField("dim_value")
-                            graph_input.type.tensor_type.shape.dim[0].dim_param = "lora_rank"
-
-                            tensor_shape = (1, graph_input.type.tensor_type.shape.dim[1].dim_value)
-                            tensor_dtype = onnx.helper.tensor_dtype_to_np_dtype(graph_input.type.tensor_type.elem_type)
-                            tensor = np.zeros(tensor_shape).astype(tensor_dtype)
-                            initializer = onnx.numpy_helper.from_array(tensor, graph_input.name)
-                            optimizer.model.graph.initializer.add().CopyFrom(initializer)
-                        elif graph_input.name.endswith("lora.down.weight"):
-                            graph_input.type.tensor_type.shape.dim[1].ClearField("dim_value")
-                            graph_input.type.tensor_type.shape.dim[1].dim_param = "lora_rank"
-
-                            tensor_shape = (graph_input.type.tensor_type.shape.dim[0].dim_value, 1)
-                            tensor_dtype = onnx.helper.tensor_dtype_to_np_dtype(graph_input.type.tensor_type.elem_type)
-                            tensor = np.zeros(tensor_shape).astype(tensor_dtype)
-                            initializer = onnx.numpy_helper.from_array(tensor, graph_input.name)
-                            optimizer.model.graph.initializer.add().CopyFrom(initializer)
-                        elif graph_input.name == "lora_network_alpha_per_rank" or graph_input.name == "lora_scale":
-                            tensor_dtype = onnx.helper.tensor_dtype_to_np_dtype(graph_input.type.tensor_type.elem_type)
-                            tensor = np.ones([]).astype(tensor_dtype)
-                            initializer = onnx.numpy_helper.from_array(tensor, graph_input.name)
-                            optimizer.model.graph.initializer.add().CopyFrom(initializer)
 
         if config["float16"]:
             op_block_list = config["force_fp32_ops"]
