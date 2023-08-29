@@ -37,7 +37,7 @@ def read_lora_weights(lora_weights_filename):
     elif lora_weights_filename.endswith(".safetensors"):
         lora_weights = load_file(lora_weights_filename)
 
-    alpha = 1.0
+    alpha = None
 
     if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
         lora_weights, alpha = convert_kohya_lora_to_diffusers(lora_weights)
@@ -217,9 +217,17 @@ def run_inference(
     sess_options = ort.SessionOptions()
     sess_options.enable_mem_pattern = False
 
+    # The ORT value initializers need to stay alive until inference is done
+    initializers = []
+
     if lora_weights_path is not None:
         lora_weights, alpha, rank = read_lora_weights(lora_weights_path)
-        sess_options.add_initializer("lora_network_alpha_per_rank", np.array(alpha / rank, dtype=np.float16))
+        alpha = alpha or rank
+
+        initializers.append(
+            ort.OrtValue.ortvalue_from_numpy(np.array(alpha / rank, dtype=np.float16), device_type="dml")
+        )
+        sess_options.add_initializer("lora_network_alpha_per_rank", initializers[-1])
 
         for weight_name, weight_value in lora_weights.items():
             if "lora" not in weight_name:
@@ -228,14 +236,20 @@ def run_inference(
             if isinstance(weight_value, torch.Tensor):
                 weight_value = weight_value.numpy()
 
-            new_values = np.transpose(weight_value.astype(np.float16))
+            initializers.append(
+                ort.OrtValue.ortvalue_from_numpy(
+                    np.ascontiguousarray(np.transpose(weight_value.astype(np.float16))),
+                    device_type="dml",
+                )
+            )
 
             if weight_name.startswith("unet."):
-                sess_options.add_initializer(weight_name, new_values)
+                sess_options.add_initializer(weight_name, initializers[-1])
             elif weight_name.startswith("text_encoder."):
-                sess_options.add_initializer(weight_name, new_values)
+                sess_options.add_initializer(weight_name, initializers[-1])
 
-        sess_options.add_initializer("lora_scale", np.array(lora_scale, dtype=np.float16))
+        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_scale, dtype=np.float16), device_type="dml"))
+        sess_options.add_initializer("lora_scale", initializers[-1])
 
     if static_dims:
         # Not necessary, but helps DML EP further optimize runtime performance.
