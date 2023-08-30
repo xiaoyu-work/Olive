@@ -224,9 +224,7 @@ def run_inference(
         lora_weights, alpha, rank = read_lora_weights(lora_weights_path)
         alpha = alpha or rank
 
-        initializers.append(
-            ort.OrtValue.ortvalue_from_numpy(np.array(alpha / rank, dtype=np.float16), device_type="dml")
-        )
+        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(alpha / rank, dtype=np.float16)))
         sess_options.add_initializer("lora_network_alpha_per_rank", initializers[-1])
 
         for weight_name, weight_value in lora_weights.items():
@@ -237,10 +235,7 @@ def run_inference(
                 weight_value = weight_value.numpy()
 
             initializers.append(
-                ort.OrtValue.ortvalue_from_numpy(
-                    np.ascontiguousarray(np.transpose(weight_value.astype(np.float16))),
-                    device_type="dml",
-                )
+                ort.OrtValue.ortvalue_from_numpy(np.ascontiguousarray(np.transpose(weight_value.astype(np.float16))))
             )
 
             if weight_name.startswith("unet."):
@@ -248,7 +243,7 @@ def run_inference(
             elif weight_name.startswith("text_encoder."):
                 sess_options.add_initializer(weight_name, initializers[-1])
 
-        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_scale, dtype=np.float16), device_type="dml"))
+        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_scale, dtype=np.float16)))
         sess_options.add_initializer("lora_scale", initializers[-1])
 
     if static_dims:
