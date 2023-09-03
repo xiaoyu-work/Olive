@@ -6,6 +6,7 @@ import config
 import torch
 from diffusers import StableDiffusionPipeline, UNet2DConditionModel
 from huggingface_hub import model_info
+from lora_weights_conversion import convert_kohya_lora_to_diffusers
 from transformers.models.clip.modeling_clip import CLIPTextModel
 
 
@@ -34,7 +35,7 @@ def is_lora_model(model_name):
 
 
 # Merges LoRA weights into the layers of a base model
-def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.0, lora_weights=None):
+def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.0):
     from collections import defaultdict
     from functools import reduce
 
@@ -60,13 +61,17 @@ def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.
             "framework": "pytorch",
         },
     )
-    lora_state_dict = torch.load(model_file, map_location="cpu") if lora_weights is None else lora_weights
+    lora_state_dict = torch.load(model_file, map_location="cpu")
+
+    alpha = None
+    if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_state_dict.keys()):
+        lora_state_dict, alpha = convert_kohya_lora_to_diffusers(lora_state_dict)
 
     # All keys in the LoRA state dictionary should have 'lora' somewhere in the string.
     keys = list(lora_state_dict.keys())
     assert all("lora" in k for k in keys)
 
-    if all(key.startswith(submodel_name) for key in keys):
+    if any(key.startswith(submodel_name) for key in keys):
         # New format (https://github.com/huggingface/diffusers/pull/2918) supports LoRA weights in both the
         # unet and text encoder where keys are prefixed with 'unet' or 'text_encoder', respectively.
         submodel_state_dict = {k: v for k, v in lora_state_dict.items() if k.startswith(submodel_name)}
@@ -90,7 +95,7 @@ def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.
         hidden_size = value_dict["to_k_lora.up.weight"].shape[0]
 
         attn_processors[key] = LoRAAttnProcessor(
-            hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=rank
+            hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=rank, network_alpha=alpha
         )
         attn_processors[key].load_state_dict(value_dict)
 
@@ -104,10 +109,26 @@ def merge_lora_weights(base_model, lora_model_id, submodel_name="unet", scale=1.
             attention_name = name[:processor_len]
 
         attention = reduce(getattr, attention_name.split(sep="."), base_model)
-        attention.to_q.weight.data += scale * torch.mm(proc.to_q_lora.up.weight, proc.to_q_lora.down.weight)
-        attention.to_k.weight.data += scale * torch.mm(proc.to_k_lora.up.weight, proc.to_k_lora.down.weight)
-        attention.to_v.weight.data += scale * torch.mm(proc.to_v_lora.up.weight, proc.to_v_lora.down.weight)
-        attention.to_out[0].weight.data += scale * torch.mm(proc.to_out_lora.up.weight, proc.to_out_lora.down.weight)
+        if submodel_name == "unet":
+            attention.to_q.weight.data += scale * torch.mm(proc.to_q_lora.up.weight, proc.to_q_lora.down.weight)
+            attention.to_k.weight.data += scale * torch.mm(proc.to_k_lora.up.weight, proc.to_k_lora.down.weight)
+            attention.to_v.weight.data += scale * torch.mm(proc.to_v_lora.up.weight, proc.to_v_lora.down.weight)
+            attention.to_out[0].weight.data += scale * torch.mm(
+                proc.to_out_lora.up.weight, proc.to_out_lora.down.weight
+            )
+        else:
+            attention.self_attn.q_proj.weight.data += scale * torch.mm(
+                proc.to_q_lora.up.weight, proc.to_q_lora.down.weight
+            )
+            attention.self_attn.k_proj.weight.data += scale * torch.mm(
+                proc.to_k_lora.up.weight, proc.to_k_lora.down.weight
+            )
+            attention.self_attn.v_proj.weight.data += scale * torch.mm(
+                proc.to_v_lora.up.weight, proc.to_v_lora.down.weight
+            )
+            attention.self_attn.out_proj.weight.data += scale * torch.mm(
+                proc.to_out_lora.up.weight, proc.to_out_lora.down.weight
+            )
 
 
 # This generates a dictionary with all LoRA weights initialized to 0 for SD models. The dictionary contains kohya
@@ -228,8 +249,7 @@ def text_encoder_load(model_name):
         if is_lora_model(model_name):
             merge_lora_weights(model, model_name, "text_encoder")
         else:
-            lora_weights = generate_lora_weights()
-            merge_lora_weights(model, config.lora_weights_file, "text_encoder", lora_weights=lora_weights)
+            merge_lora_weights(model, config.lora_weights_file, "text_encoder")
 
     return model
 
@@ -316,8 +336,7 @@ def unet_load(model_name):
         if is_lora_model(model_name):
             merge_lora_weights(model, model_name, "unet")
         else:
-            lora_weights = generate_lora_weights()
-            merge_lora_weights(model, config.lora_weights_file, "unet", lora_weights=lora_weights)
+            merge_lora_weights(model, config.lora_weights_file, "unet")
 
     return model
 

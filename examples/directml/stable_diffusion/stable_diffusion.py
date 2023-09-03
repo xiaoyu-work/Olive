@@ -37,16 +37,21 @@ def read_lora_weights(lora_weights_filename):
     elif lora_weights_filename.endswith(".safetensors"):
         lora_weights = load_file(lora_weights_filename)
 
-    alpha = None
+    lora_network_alpha = None
 
     if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
-        lora_weights, alpha = convert_kohya_lora_to_diffusers(lora_weights)
+        lora_weights, lora_network_alpha = convert_kohya_lora_to_diffusers(lora_weights)
+
+    for weight_key in list(lora_weights.keys()):
+        if not weight_key.startswith("unet.") and not weight_key.startswith("unet."):
+            lora_weights["unet." + weight_key] = lora_weights[weight_key]
+            del lora_weights[weight_key]
 
     rank = lora_weights[
         "unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.processor.to_k_lora.down.weight"
     ].shape[0]
 
-    return lora_weights, alpha, rank
+    return lora_weights, lora_network_alpha, rank
 
 
 def run_inference_loop(
@@ -57,6 +62,7 @@ def run_inference_loop(
     batch_size,
     image_size,
     num_inference_steps,
+    seed,
     image_callback=None,
     step_callback=None,
 ):
@@ -68,6 +74,8 @@ def run_inference_loop(
 
     while images_saved < num_images:
         print(f"\nInference Batch Start (batch size = {batch_size}).")
+        generator = None if seed is None else np.random.RandomState(seed=seed)
+
         result = pipeline(
             [prompt] * batch_size,
             negative_prompt=[negative_prompt] * batch_size,
@@ -75,6 +83,7 @@ def run_inference_loop(
             callback=update_steps if step_callback else None,
             height=image_size,
             width=image_size,
+            generator=generator,
         )
         passed_safety_checker = 0
 
@@ -93,18 +102,27 @@ def run_inference_loop(
 
 
 def run_inference_gui(
-    pipeline,
     prompt,
     negative_prompt,
+    lora_weights_path,
+    lora_scale,
+    static_dims,
     num_images,
     batch_size,
     image_size,
     num_inference_steps,
+    seed,
 ):
+    initializers = []
+    lora_weights_path = os.path.normpath(os.path.abspath(lora_weights_path))
+    prev_lora_weights_path = lora_weights_path
+    prev_lora_scale = lora_scale
+    pipeline, initializers = load_pipeline(
+        optimized_model_dir, static_dims, lora_weights_path, lora_scale, batch_size, image_size
+    )
+
     def update_progress_bar(total_steps_completed):
         progress_bar["value"] = total_steps_completed
-
-    lora_weights_filename = None
 
     def image_completed(index, path):
         img = Image.open(path)
@@ -115,8 +133,21 @@ def run_inference_gui(
             generate_button["state"] = "normal"
 
     def on_generate_click():
+        nonlocal pipeline
+        nonlocal initializers
+        nonlocal prev_lora_weights_path
+        nonlocal prev_lora_scale
+
         generate_button["state"] = "disabled"
         progress_bar["value"] = 0
+
+        if lora_weights_path != prev_lora_weights_path or lora_scale != prev_lora_scale:
+            prev_lora_weights_path = lora_weights_path
+            prev_lora_scale = lora_scale
+            pipeline, initializers = load_pipeline(
+                optimized_model_dir, static_dims, lora_weights_path, lora_scale, batch_size, image_size
+            )
+
         threading.Thread(
             target=run_inference_loop,
             args=(
@@ -127,14 +158,23 @@ def run_inference_gui(
                 batch_size,
                 image_size,
                 num_inference_steps,
+                None if seed_prompt_textbox.get() == "" else int(seed_prompt_textbox.get()),
                 image_completed,
                 update_progress_bar,
             ),
         ).start()
 
     def on_lora_weights_click():
-        nonlocal lora_weights_filename
-        lora_weights_filename = fd.askopenfilename()
+        nonlocal lora_weights_path
+        new_weights_path = fd.askopenfilename()
+
+        if new_weights_path != "":
+            lora_weights_path = os.path.normpath(os.path.abspath(new_weights_path))
+            lora_weights_path_var.set(lora_weights_path)
+
+    def update_scale(new_lora_scale):
+        nonlocal lora_scale
+        lora_scale = float(new_lora_scale)
 
     if num_images > 9:
         print("WARNING: interactive UI only supports displaying up to 9 images")
@@ -147,10 +187,13 @@ def run_inference_gui(
     bar_height = 10
     button_width = 80
     textbox_height = 30
+    slider_height = 40
     label_width = 100
     padding = 2
-    window_width = image_cols * image_size + (image_cols + 1) * padding + 100
-    window_height = image_rows * image_size + (image_rows + 1) * padding + bar_height + textbox_height * 2
+    window_width = image_cols * image_size + (image_cols + 1) * padding
+    window_height = (
+        image_rows * image_size + (image_rows + 1) * padding + bar_height + textbox_height * 5 + slider_height
+    )
 
     window = tk.Tk()
     window.title("Stable Diffusion")
@@ -176,13 +219,10 @@ def run_inference_gui(
 
     prompt_textbox = tk.Entry(window)
     prompt_textbox.insert(tk.END, prompt)
-    prompt_textbox.place(x=label_width, y=y, width=window_width - button_width * 2 - label_width, height=textbox_height)
+    prompt_textbox.place(x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height)
 
     generate_button = tk.Button(window, text="Generate", command=on_generate_click)
-    generate_button.place(x=window_width - button_width * 2, y=y, width=button_width, height=textbox_height * 2)
-
-    generate_button = tk.Button(window, text="LoRA Weights", command=on_lora_weights_click)
-    generate_button.place(x=window_width - button_width, y=y, width=button_width, height=textbox_height * 2)
+    generate_button.place(x=window_width - button_width, y=y, width=button_width, height=textbox_height * 3)
 
     y += textbox_height
 
@@ -192,27 +232,47 @@ def run_inference_gui(
     negative_prompt_textbox = tk.Entry(window)
     negative_prompt_textbox.insert(tk.END, negative_prompt)
     negative_prompt_textbox.place(
-        x=label_width, y=y, width=window_width - button_width * 2 - label_width, height=textbox_height
+        x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height
     )
+
+    y += textbox_height
+
+    seed_prompt_label = tk.Label(window, text="Seed")
+    seed_prompt_label.place(x=0, y=y)
+
+    seed_prompt_textbox = tk.Entry(window)
+    seed_prompt_textbox.insert(tk.END, seed or "")
+    seed_prompt_textbox.place(
+        x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height
+    )
+
+    y += textbox_height
+
+    lora_weights_label = tk.Label(window, text="LoRA Weights")
+    lora_weights_label.place(x=0, y=y)
+
+    lora_weights_path_var = tk.StringVar(window, lora_weights_path or "")
+    lora_weights_textbox = tk.Entry(window, state=tk.DISABLED, textvariable=lora_weights_path_var)
+    lora_weights_textbox.place(
+        x=label_width, y=y, width=window_width - button_width - label_width, height=textbox_height
+    )
+
+    lora_weights_button = tk.Button(window, text="Load", command=on_lora_weights_click)
+    lora_weights_button.place(x=window_width - button_width, y=y, width=button_width, height=textbox_height)
+
+    y += textbox_height
+
+    lora_scale_label = tk.Label(window, text="LoRA Scale")
+    lora_scale_label.place(x=0, y=y + 15)
+
+    lora_scale_slider = tk.Scale(window, from_=0.0, to=1.0, resolution=0.01, orient=tk.HORIZONTAL, command=update_scale)
+    lora_scale_slider.set(lora_scale)
+    lora_scale_slider.place(x=label_width, y=y, width=window_width - label_width, height=slider_height)
 
     window.mainloop()
 
 
-def run_inference(
-    optimized_model_dir,
-    prompt,
-    negative_prompt,
-    lora_weights_path,
-    lora_scale,
-    num_images,
-    batch_size,
-    image_size,
-    num_inference_steps,
-    static_dims,
-    interactive,
-):
-    ort.set_default_logger_severity(3)
-
+def load_pipeline(optimized_model_dir, static_dims, lora_weights_path, lora_scale, batch_size, image_size):
     print("Loading models into ORT session...")
     sess_options = ort.SessionOptions()
     sess_options.enable_mem_pattern = False
@@ -221,10 +281,10 @@ def run_inference(
     initializers = []
 
     if lora_weights_path is not None:
-        lora_weights, alpha, rank = read_lora_weights(lora_weights_path)
-        alpha = alpha or rank
+        lora_weights, lora_network_alpha, rank = read_lora_weights(lora_weights_path)
+        lora_network_alpha = lora_network_alpha or rank
 
-        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(alpha / rank, dtype=np.float16)))
+        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_network_alpha / rank, dtype=np.float16)))
         sess_options.add_initializer("lora_network_alpha_per_rank", initializers[-1])
 
         for weight_name, weight_value in lora_weights.items():
@@ -262,17 +322,43 @@ def run_inference(
         optimized_model_dir, provider="DmlExecutionProvider", sess_options=sess_options
     )
 
+    return pipeline, initializers
+
+
+def run_inference(
+    optimized_model_dir,
+    prompt,
+    negative_prompt,
+    lora_weights_path,
+    lora_scale,
+    num_images,
+    batch_size,
+    image_size,
+    num_inference_steps,
+    seed,
+    static_dims,
+    interactive,
+):
+    ort.set_default_logger_severity(3)
+
     if interactive:
         run_inference_gui(
-            pipeline,
             prompt,
             negative_prompt,
+            lora_weights_path,
+            lora_scale,
+            static_dims,
             num_images,
             batch_size,
             image_size,
             num_inference_steps,
+            seed,
         )
     else:
+        pipeline, initializers = load_pipeline(
+            optimized_model_dir, static_dims, lora_weights_path, lora_scale, batch_size, image_size
+        )
+
         run_inference_loop(
             pipeline,
             prompt,
@@ -281,6 +367,7 @@ def run_inference(
             batch_size,
             image_size,
             num_inference_steps,
+            seed,
         )
 
 
@@ -467,6 +554,12 @@ if __name__ == "__main__":
         help="Path to the .bin or .safetensors file containing the LoRA weights to add to the model.",
     )
     parser.add_argument(
+        "--seed",
+        default=None,
+        type=int,
+        help="The seed to give to the generator to generate deterministic results.",
+    )
+    parser.add_argument(
         "--lora_weights_strategy",
         choices=["inserted", "folded"],
         default=None,
@@ -572,6 +665,7 @@ if __name__ == "__main__":
                 args.batch_size,
                 config.image_size,
                 args.num_inference_steps,
+                args.seed,
                 use_static_dims,
                 args.interactive,
             )
