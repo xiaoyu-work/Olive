@@ -114,7 +114,10 @@ def run_inference_gui(
     seed,
 ):
     initializers = []
-    lora_weights_path = os.path.normpath(os.path.abspath(lora_weights_path))
+
+    if lora_weights_path is not None:
+        lora_weights_path = os.path.normpath(os.path.abspath(lora_weights_path))
+
     prev_lora_weights_path = lora_weights_path
     prev_lora_scale = lora_scale
     pipeline, initializers = load_pipeline(
@@ -285,7 +288,7 @@ def load_pipeline(optimized_model_dir, static_dims, lora_weights_path, lora_scal
         lora_network_alpha = lora_network_alpha or rank
 
         initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_network_alpha / rank, dtype=np.float16)))
-        sess_options.add_initializer("lora_network_alpha_per_rank", initializers[-1])
+        sess_options.add_initializer("lora_network_alpha", initializers[-1])
 
         for weight_name, weight_value in lora_weights.items():
             if "lora" not in weight_name:

@@ -26,7 +26,11 @@ def get_base_model_name(model_name):
     if model_name.endswith(".safetensors"):
         return model_name
 
-    return model_info(model_name).cardData.get("base_model", model_name)
+    info = model_info(model_name)
+    if not hasattr(info, "cardData"):
+        return model_name
+
+    return info.cardData.get("base_model", model_name)
 
 
 def is_lora_model(model_name):
