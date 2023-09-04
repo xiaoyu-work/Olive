@@ -37,13 +37,13 @@ def read_lora_weights(lora_weights_filename):
     elif lora_weights_filename.endswith(".safetensors"):
         lora_weights = load_file(lora_weights_filename)
 
-    lora_network_alpha = None
-
     if all((k.startswith("lora_te_") or k.startswith("lora_unet_")) for k in lora_weights.keys()):
         lora_weights, lora_network_alpha = convert_kohya_lora_to_diffusers(lora_weights)
+    else:
+        lora_network_alpha = None
 
     for weight_key in list(lora_weights.keys()):
-        if not weight_key.startswith("unet.") and not weight_key.startswith("unet."):
+        if not weight_key.startswith("unet.") and not weight_key.startswith("text_encoder."):
             lora_weights["unet." + weight_key] = lora_weights[weight_key]
             del lora_weights[weight_key]
 
@@ -51,7 +51,12 @@ def read_lora_weights(lora_weights_filename):
         "unet.down_blocks.0.attentions.0.transformer_blocks.0.attn1.processor.to_k_lora.down.weight"
     ].shape[0]
 
-    return lora_weights, lora_network_alpha, rank
+    if lora_network_alpha is None:
+        lora_network_alpha = rank
+
+    lora_network_alpha_per_rank = lora_network_alpha / rank
+
+    return lora_weights, lora_network_alpha_per_rank
 
 
 def run_inference_loop(
@@ -284,11 +289,10 @@ def load_pipeline(optimized_model_dir, static_dims, lora_weights_path, lora_scal
     initializers = []
 
     if lora_weights_path is not None:
-        lora_weights, lora_network_alpha, rank = read_lora_weights(lora_weights_path)
-        lora_network_alpha = lora_network_alpha or rank
+        lora_weights, lora_network_alpha_per_rank = read_lora_weights(lora_weights_path)
 
-        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_network_alpha / rank, dtype=np.float16)))
-        sess_options.add_initializer("lora_network_alpha", initializers[-1])
+        initializers.append(ort.OrtValue.ortvalue_from_numpy(np.array(lora_network_alpha_per_rank, dtype=np.float16)))
+        sess_options.add_initializer("lora_network_alpha_per_rank", initializers[-1])
 
         for weight_name, weight_value in lora_weights.items():
             if "lora" not in weight_name:

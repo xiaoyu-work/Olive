@@ -71,7 +71,7 @@ class LoraWeightsRenamer:
 
         network_alpha_node = self.model.get_children(matmul_node)[0]
         if network_alpha_node.op_type == "Mul":
-            self._add_mul_initializer(network_alpha_node, "lora_network_alpha")
+            self._add_mul_initializer(network_alpha_node, "lora_network_alpha_per_rank")
             lora_scale_node = self.model.get_children(network_alpha_node)[0]
             assert lora_scale_node.op_type == "Mul"
             self._add_mul_initializer(lora_scale_node, "lora_scale")
