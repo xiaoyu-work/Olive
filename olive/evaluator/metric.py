@@ -2,6 +2,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
+import json
 import logging
 from enum import Enum
 from typing import ClassVar, Dict, List, Optional, Union
@@ -145,7 +146,7 @@ class Metric(ConfigBase):
 
         return v
 
-    @validator("user_config", pre=True)
+    @validator("user_config", pre=True, always=True)
     def validate_user_config(cls, v, values):
         if "type" not in values:
             raise ValueError("Invalid type")
@@ -174,7 +175,7 @@ class MetricResult(ConfigDictBase):
 
     def __str__(self) -> str:
         repr_obj = {k: v.value for k, v in self.__root__.items()}
-        return f"{repr_obj}"
+        return json.dumps(repr_obj, indent=2)
 
 
 def joint_metric_key(metric_name, sub_type_name):

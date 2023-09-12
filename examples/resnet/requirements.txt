@@ -1,7 +1,8 @@
 azure-ai-ml
 azure-identity
-azureml-fsspec<=1.1.1
+azureml-fsspec
 onnxruntime
 pytorch-lightning
 scipy
+tabulate
 torchvision

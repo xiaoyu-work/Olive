@@ -9,9 +9,9 @@ from enum import Enum
 from functools import partial
 from pathlib import Path
 from types import FunctionType, MethodType
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
-from pydantic import BaseModel, create_model, validator
+from pydantic import BaseModel, Field, create_model, root_validator, validator
 
 from olive.common.utils import hash_function, hash_object
 
@@ -151,6 +151,53 @@ class ConfigDictBase(ConfigBase):
         return len(self.__root__) if self.__root__ else 0
 
 
+class ConfigWithExtraArgs(ConfigBase):
+    """
+    Config class that automatically gathers all values not defined in the class fields into a dict Field
+    called `extra_args`
+    """
+
+    extra_args: Dict = Field(
+        None,
+        description=(
+            "Dictionary of extra arguments that are not defined in the class fields. Values can be provided in two"
+            " ways: 1. As a dict value to `extra_args` key. 2. As keyword arguments to the class constructor. Any"
+            " values provided as keyword arguments will be added to the `extra_args` dict. `extra_args` values take"
+            " precedence over keyword arguments if the same key is provided in both."
+        ),
+    )
+
+    @root_validator(pre=True)
+    def gather_extra_args(cls, values):
+        other_fields = set()
+        for field in cls.__fields__.values():
+            for name in (field.name, field.alias):
+                if name != "extra_args":
+                    other_fields.add(name)
+
+        extra_args = values.pop("extra_args", {}) or {}
+        # ensure that extra_args does not contain any field names
+        for name in list(extra_args):  # need a copy of the keys since we are mutating the dict
+            if name in other_fields:
+                logger.warning(
+                    f"'{name}' provided to 'extra_args' is already defined in the class fields. Please provide the"
+                    " value directly to the field. Ignoring."
+                )
+                del extra_args[name]
+        # put any values provided as keyword arguments into extra_args
+        for name in list(values):  # need a copy of the keys since we are mutating the dict
+            if name in other_fields:
+                continue
+            if name in extra_args:
+                # extra_args takes precedence over keyword arguments
+                logger.warning(f"kwarg '{name}' is already defined in 'extra_args'. Ignoring.")
+            else:
+                extra_args[name] = values.pop(name)
+        if extra_args:
+            values["extra_args"] = extra_args
+        return values
+
+
 class ParamCategory(str, Enum):
     NONE = "none"
     OBJECT = "object"
@@ -217,7 +264,7 @@ def create_config_class(
     default_config: Dict[str, ConfigParam],
     base: type = ConfigBase,
     validators: Dict[str, Callable] = None,
-):
+) -> Type[ConfigBase]:
     """
     Create a Pydantic model class from a configuration dictionary.
     """
@@ -246,12 +293,15 @@ def create_config_class(
     return create_model(class_name, **config, __base__=base, __validators__=validators)
 
 
+T = TypeVar("T", bound=ConfigBase)
+
+
 def validate_config(
     config: Union[Dict[str, Any], ConfigBase, None],
-    base_class: ConfigBase,
-    instance_class: Optional[ConfigBase] = None,
+    base_class: Type[T],
+    instance_class: Optional[Type[T]] = None,
     warn_unused_keys: bool = True,
-):
+) -> T:
     """
     Validate a config dictionary or object against a base class and instance class.
     instance class is a subclass of base class.

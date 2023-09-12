@@ -6,7 +6,7 @@ import inspect
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union, get_args
 
 from pydantic import validator
 
@@ -14,13 +14,12 @@ from olive.common.config_utils import ConfigBase, ParamCategory, validate_config
 from olive.common.user_module_loader import UserModuleLoader
 from olive.data.config import DataConfig
 from olive.hardware import DEFAULT_CPU_ACCELERATOR, AcceleratorSpec
-from olive.model import CompositeOnnxModel, DistributedOnnxModel, OliveModel
+from olive.model import CompositeOnnxModel, DistributedOnnxModel, OliveModel, PyTorchModel
 from olive.passes.pass_config import (
     PassConfigBase,
     PassConfigParam,
     PassParamDefault,
     create_config_class,
-    get_data_config,
     get_user_script_config,
 )
 from olive.resource_path import ResourcePath
@@ -46,8 +45,6 @@ class Pass(ABC):
     registry: Dict[str, Type["Pass"]] = {}
     # True if pass configuration requires user script for non-local host support
     _requires_user_script: bool = False
-    # True if pass configuration requires data configuration which will leverage data container for pass execution
-    _requires_data_config: bool = False
     # True if the pass processes a composite model at once. Otherwise, the components of the
     # composite model will be processed individually.
     _accepts_composite_model: bool = False
@@ -80,9 +77,6 @@ class Pass(ABC):
         self._config = config
         if self._requires_user_script:
             self._user_module_loader = UserModuleLoader(self._config["user_script"], self._config["script_dir"])
-        if self._requires_data_config:
-            data_config = self._config.get("data_config") or {}
-            self._data_config = DataConfig(**data_config)
 
         self._fixed_params = {}
         self._search_space = {}
@@ -109,10 +103,6 @@ class Pass(ABC):
         return True
 
     @classmethod
-    def requires_data_config(cls):
-        return cls._requires_data_config
-
-    @classmethod
     def generate_search_space(
         cls,
         accelerator_spec: AcceleratorSpec,
@@ -134,9 +124,7 @@ class Pass(ABC):
         return config
 
     @classmethod
-    def get_config_class(
-        cls, accelerator_spec: AcceleratorSpec, disable_search: Optional[bool] = False
-    ) -> Type[PassConfigBase]:
+    def get_config_class(cls, accelerator_spec: AcceleratorSpec, disable_search: Optional[bool] = False):
         """
         Get the configuration class for the pass.
         """
@@ -151,10 +139,19 @@ class Pass(ABC):
         """
         config = {}
         if cls._requires_user_script:
+            # add user script related parameters
             config.update(get_user_script_config())
-        if cls.requires_data_config():
-            config.update(get_data_config())
-        return {**config, **cls._default_config(accelerator_spec)}
+        # add all other parameters
+        config.update(cls._default_config(accelerator_spec))
+        # validate that all parameters ending with data_config are of type DataConfig, Union[DataConfig, dict], ...
+        # this requirement is on the pass developer but we can only check it here
+        for param, param_config in config.items():
+            if param.endswith("data_config"):
+                param_type = param_config.type_
+                assert param_type == DataConfig or DataConfig in get_args(
+                    param_type
+                ), f"{param} ending with data_config must be of type DataConfig."
+        return config
 
     @staticmethod
     def _validators() -> Dict[str, Callable]:
@@ -241,6 +238,7 @@ class Pass(ABC):
             if default_config[key].category == ParamCategory.OBJECT and isinstance(value, str):
                 assert user_module_loader.user_script, f"'user_script' must be specified if a {key} is a string."
         # TODO: once convention for user_script and script dir is finalized, let config class handle
+        # currently, Olive cannot have other types of pytorch models (entire model, custom loader, etc) + hf_config
         # the resolution during serialization
         if config["user_script"] is not None:
             config["user_script"] = str(Path(config["user_script"]).resolve())
@@ -390,11 +388,22 @@ class Pass(ABC):
             component_names = []
             for cidx, child in enumerate(model.get_model_components()):
                 component_output_path = Path(output_model_path).with_suffix("") / str(cidx)
-                components.append(self._run_for_config(child, data_root, config, str(component_output_path)))
+                output_model_components = self._run_for_config(child, data_root, config, str(component_output_path))
+                components.append(self.inherit_hf_config_from_input_model(model, output_model_components))
                 component_names.append(model.get_model_component_name(cidx))
             return CompositeOnnxModel(components, component_names, hf_config=model.hf_config)
         else:
-            return self._run_for_config(model, data_root, config, output_model_path)
+            output_model = self._run_for_config(model, data_root, config, output_model_path)
+            return self.inherit_hf_config_from_input_model(model, output_model)
+
+    def inherit_hf_config_from_input_model(self, input_model: OliveModel, output_model: OliveModel) -> OliveModel:
+        # TODO: handle the case with local model path and huggingface model config for torch model
+        if hasattr(output_model, "hf_config") and not isinstance(output_model, PyTorchModel):
+            # not all models have hf_config
+            # Do not inherit hf_config from input model if output_model is PyTorchModel for time being.
+            if not output_model.hf_config and getattr(input_model, "hf_config", None):
+                output_model.hf_config = input_model.hf_config
+        return output_model
 
     def serialize_config(self, config: Dict[str, Any], check_object: bool = False) -> str:
         """

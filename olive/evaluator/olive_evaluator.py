@@ -32,6 +32,7 @@ from olive.evaluator.metric import (
     joint_metric_key,
 )
 from olive.evaluator.metric_backend import MetricBackend
+from olive.exception import OliveEvaluationException
 from olive.hardware import Device
 from olive.model import DistributedOnnxModel, OliveModel, ONNXModel, OpenVINOModel, PyTorchModel, SNPEModel
 from olive.model.model_config import is_io_config_static
@@ -204,6 +205,7 @@ class OliveEvaluator(ABC):
 
     @staticmethod
     def get_user_config(framework: Framework, data_root: str, metric: Metric):
+        assert metric.user_config, "user_config is not specified in the metric config"
         user_module = UserModuleLoader(metric.user_config.user_script, metric.user_config.script_dir)
 
         post_processing_func = getattr(metric.user_config, "post_processing_func", None)
@@ -326,6 +328,9 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
             device=device,
             execution_providers=execution_providers,
         )
+
+        OnnxEvaluator.disable_ort_fallback(session, execution_providers)
+
         io_config = model.get_io_config()
 
         preds = []
@@ -387,6 +392,8 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
             device=device,
             execution_providers=execution_providers,
         )
+        OnnxEvaluator.disable_ort_fallback(session, execution_providers)
+
         io_config = model.get_io_config()
 
         input_data, _ = next(iter(dataloader))
@@ -426,7 +433,8 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
         data_root = config["data_root"]
         local_rank = config["local_rank"]
         world_size = config["world_size"]
-        inference_settings = config.get("inference_settings", {}) or {}
+        inference_settings = config["inference_settings"]
+        execution_providers = config["providers"]
         metric = Metric.from_json(config["metric"])
 
         import os
@@ -438,9 +446,11 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
 
         local_rank = MPI.COMM_WORLD.Get_rank()
 
-        # TODO: EPs should be selected based on accelerator_spec param passed down from the engine
-        inference_settings["execution_provider"] = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        inference_settings["provider_options"] = [{"device_id": str(local_rank)}, {}]
+        inference_settings["execution_provider"] = execution_providers
+        inference_settings["provider_options"] = [
+            {"device_id": str(local_rank)} if provider == "CUDAExecutionProvider" else {}
+            for provider in execution_providers
+        ]
 
         model = ONNXModel(model_path, inference_settings=inference_settings)
         dataloader, _, post_func = OnnxEvaluator.get_user_config(model.framework, data_root, metric)
@@ -466,7 +476,12 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
         return model_output, targets
 
     def _evaluate_distributed_accuracy(
-        self, model: DistributedOnnxModel, data_root: str, metric: Metric
+        self,
+        model: DistributedOnnxModel,
+        data_root: str,
+        metric: Metric,
+        device: Device,
+        execution_providers: Union[str, List[str]],
     ) -> MetricResult:
         from copy import deepcopy
 
@@ -486,6 +501,8 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
             cfg["local_rank"] = rank
             cfg["model_path"] = model.ranked_model_path(rank)
             cfg["data_root"] = data_root
+            cfg["device"] = device
+            cfg["providers"] = execution_providers
             args.append(cfg)
 
         with MPIPoolExecutor(max_workers=model.ranks) as executor:
@@ -504,7 +521,8 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
         data_root = config["data_root"]
         local_rank = config["local_rank"]
         world_size = config["world_size"]
-        inference_settings = config.get("inference_settings", {}) or {}
+        inference_settings = config["inference_settings"]
+        execution_providers = config["providers"]
         metric = Metric.from_json(config["metric"])
 
         import os
@@ -516,9 +534,11 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
 
         local_rank = MPI.COMM_WORLD.Get_rank()
         warmup_num, repeat_test_num, sleep_num = get_latency_config_from_metric(metric)
-        # TODO: EPs should be selected based on accelerator_spec param passed down from the engine
-        inference_settings["execution_provider"] = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        inference_settings["provider_options"] = [{"device_id": str(local_rank)}, {}]
+        inference_settings["execution_provider"] = execution_providers
+        inference_settings["provider_options"] = [
+            {"device_id": str(local_rank)} if provider == "CUDAExecutionProvider" else {}
+            for provider in execution_providers
+        ]
 
         model = ONNXModel(model_path, inference_settings=inference_settings)
         dataloader, _, _ = OnnxEvaluator.get_user_config(model.framework, data_root, metric)
@@ -550,7 +570,12 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
         return latencies
 
     def _evaluate_distributed_latency(
-        self, model: DistributedOnnxModel, data_root: str, metric: Metric
+        self,
+        model: DistributedOnnxModel,
+        data_root: str,
+        metric: Metric,
+        device,
+        execution_providers: Union[str, List[str]],
     ) -> MetricResult:
         from copy import deepcopy
 
@@ -570,6 +595,8 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
             cfg["local_rank"] = rank
             cfg["model_path"] = model.ranked_model_path(rank)
             cfg["data_root"] = data_root
+            cfg["device"] = device
+            cfg["providers"] = execution_providers
             args.append(cfg)
 
         with MPIPoolExecutor(max_workers=model.ranks) as executor:
@@ -592,7 +619,9 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
         if isinstance(model, ONNXModel):
             return self._evaluate_onnx_accuracy(model, metric, dataloader, post_func, device, execution_providers)
         elif isinstance(model, DistributedOnnxModel):
-            return self._evaluate_distributed_accuracy(model, data_root, metric)
+            if device != Device.GPU:
+                raise ValueError("Distributed inferencing is supported only on GPU")
+            return self._evaluate_distributed_accuracy(model, data_root, metric, device, execution_providers)
         else:
             raise TypeError(f"Cannot evaluate accuracy for model of type: {type(model)}")
 
@@ -609,9 +638,26 @@ class OnnxEvaluator(OliveEvaluator, framework=Framework.ONNX):
         if isinstance(model, ONNXModel):
             return self._evaluate_onnx_latency(model, metric, dataloader, post_func, device, execution_providers)
         elif isinstance(model, DistributedOnnxModel):
-            return self._evaluate_distributed_latency(model, data_root, metric)
+            if device != Device.GPU:
+                raise ValueError("Distributed inferencing is supported only on GPU")
+            return self._evaluate_distributed_latency(model, data_root, metric, device, execution_providers)
         else:
             raise TypeError(f"Cannot evaluate latency for model of type: {type(model)}")
+
+    @staticmethod
+    def disable_ort_fallback(session, execution_providers):
+        if execution_providers:
+            assert isinstance(execution_providers, (str, list))
+            execution_providers = [execution_providers] if isinstance(execution_providers, str) else execution_providers
+            session_providers = session.get_providers()
+            for ep in execution_providers:
+                if ep not in session_providers:
+                    raise OliveEvaluationException(
+                        f"The onnxruntime fallback happens. {ep} is not in the session providers {session_providers}."
+                        f" session._enable_fallback = {session._enable_fallback}"
+                    )
+            else:
+                session.disable_fallback()
 
 
 class PyTorchEvaluator(OliveEvaluator, framework=Framework.PYTORCH):
