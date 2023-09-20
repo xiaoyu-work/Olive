@@ -61,7 +61,7 @@ def quant_pre_process(
         external_data_location: The file location to save the external file
         external_data_size_threshold: The size threshold for external data
     """
-    with TemporaryDirectory(prefix="pre.quant.") as quant_tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="pre.quant.") as quant_tmp_dir:
         temp_path = Path(quant_tmp_dir)
         model = None
 
@@ -149,4 +149,3 @@ def quant_pre_process(
         )
     else:
         onnx.save(model, output_model_path)
-
