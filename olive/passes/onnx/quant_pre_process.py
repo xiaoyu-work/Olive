@@ -105,6 +105,7 @@ def quant_pre_process(
                 )
                 logger.error(traceback.format_exc())
 
+            del sess_option
             input_model_path = opt_model_path
 
         if not skip_onnx_shape:
@@ -149,16 +150,3 @@ def quant_pre_process(
     else:
         onnx.save(model, output_model_path)
 
-
-@contextmanager
-def TemporaryDirectory(**kwargs):
-    # TODO: this is a workaround for issue https://github.com/microsoft/onnxruntime/issues/17627
-    # on Windows.
-    name = tempfile.mkdtemp(**kwargs)
-    try:
-        yield name
-    finally:
-        try:
-            shutil.rmtree(name)
-        except OSError:
-            logger.warning(f"Failed to remove: {name}", exc_info=True)
