@@ -130,7 +130,7 @@ def quant_pre_process(
 
             inferred_model_path = str(temp_path / "onnx_shape_inferred.onnx")
             onnx.shape_inference.infer_shapes_path(input_model_path, inferred_model_path)
-            model = onnx.load(inferred_model_path)
+            # model = onnx.load(inferred_model_path)
 
     if model is None:
         model = onnx.load(input_model_path)
