@@ -8,13 +8,13 @@
         "docker"
     ],
     "cpu": [
-        "onnxruntime"
+        "onnxruntime<=1.15.1"
     ],
     "gpu": [
-        "onnxruntime-gpu"
+        "onnxruntime-gpu<=1.15.1"
     ],
     "directml": [
-        "onnxruntime-directml"
+        "onnxruntime-directml<=1.15.1"
     ],
     "openvino": [
         "openvino==2022.3.0",
