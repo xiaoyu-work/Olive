@@ -61,7 +61,7 @@ def quant_pre_process(
         external_data_location: The file location to save the external file
         external_data_size_threshold: The size threshold for external data
     """
-    with tempfile.TemporaryDirectory(prefix="pre.quant.") as quant_tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="pre.quant.", dir="./") as quant_tmp_dir:
         temp_path = Path(quant_tmp_dir)
         model = None
 
@@ -105,7 +105,6 @@ def quant_pre_process(
                 )
                 logger.error(traceback.format_exc())
 
-            del sess_option
             input_model_path = opt_model_path
 
         if not skip_onnx_shape:
@@ -130,7 +129,7 @@ def quant_pre_process(
 
             inferred_model_path = str(temp_path / "onnx_shape_inferred.onnx")
             onnx.shape_inference.infer_shapes_path(input_model_path, inferred_model_path)
-            # model = onnx.load(inferred_model_path)
+            model = onnx.load(inferred_model_path)
 
     if model is None:
         model = onnx.load(input_model_path)
