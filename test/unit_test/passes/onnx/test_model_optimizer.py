@@ -41,7 +41,7 @@ def test_onnx_model_temp_path(use_sess):
             sess_option.optimized_model_filepath = str(temp_path / "optimized.onnx")
             sess_option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_BASIC
             sess = onnxruntime.InferenceSession(output_model_path_1, sess_option, providers=["CPUExecutionProvider"])
-            sess._reset_session()
+            sess._reset_session(providers=["CPUExecutionProvider"], provider_options=None)
         else:
             ...
     print("test_onnx_model_temp_path done")
