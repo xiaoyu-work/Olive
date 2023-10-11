@@ -8,16 +8,18 @@ from typing import Any, Dict, List, Union
 
 import torch
 
-from olive.common.utils import tensor_data_to_device
+from olive.common.config_utils import validate_config
+from olive.common.utils import get_attr, tensor_data_to_device
+from olive.data.config import DataConfig
 from olive.hardware.accelerator import AcceleratorSpec, Device
 from olive.model import PyTorchModel
+from olive.model.hf_utils import get_model_max_length
 from olive.passes import Pass
 from olive.passes.olive_pass import PassConfigParam
 from olive.passes.pytorch.sparsegpt_utils import (
-    _get_attr,
     get_layer_submodules,
     get_layers,
-    seqlens,
+    supported_models,
     validate_min_max_layers,
 )
 
@@ -25,18 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 class TorchTRTConversion(Pass):
-    """
-    Convert torch.nn.Linear modules in the transformer layers of a Hugging Face PyTorch model to TensorRT modules with
-    fp16 precision and sparse weights, if applicable.
+    """Convert torch.nn.Linear modules in the transformer layers of a HuggingFace PyTorch model to TensorRT modules.
 
+    The conversion would include fp16 precision and sparse weights, if applicable.
     The entire model is saved using `torch.save` and can be loaded using `torch.load`. Loading the model requires
     `torch-tensorrt` and Olive to be installed.
 
     This pass only supports PyTorchModel with hf_config. The transformers model type
     must be one of [bloom, gpt2, gpt_neox, llama, opt].
     """
-
-    _requires_data_config = True
 
     @staticmethod
     def _default_config(accelerator_spec: AcceleratorSpec) -> Dict[str, PassConfigParam]:
@@ -57,6 +56,14 @@ class TorchTRTConversion(Pass):
                 default_value=False,
                 description="Convert entire model to fp16. If False, only the sparse modules are converted to fp16.",
             ),
+            "data_config": PassConfigParam(
+                type_=Union[DataConfig, Dict],
+                required=True,
+                description=(
+                    "Data config to use for compiling module to TensorRT. The batch size of the compiled module is set"
+                    " to the batch size of the first batch of the dataloader."
+                ),
+            ),
         }
 
     def validate_search_point(
@@ -73,21 +80,22 @@ class TorchTRTConversion(Pass):
     ) -> PyTorchModel:
         from olive.passes.pytorch.trt_utils import compile_trt_model
 
-        model_config = model.get_model_config()
-        model_type = model_config.model_type
-        if model_type not in seqlens:
-            raise ValueError(f"Unsupported model type: {model_type}. Supported types: {seqlens.keys()}")
+        model_type = model.model_attributes["model_type"]
+        if model_type not in supported_models:
+            raise ValueError(f"Unsupported model type: {model_type}. Supported types: {supported_models}")
 
         if not torch.cuda.is_available():
             raise ValueError("TorchTRTConversion requires a GPU to run.")
         device = "cuda"
 
         # load_data
-        assert config["data_config"] is not None, "Data config is required for TorchTRTConversion."
-        first_batch = self._data_config.to_data_container().get_first_batch(data_root_path=data_root)[0]
+        data_config = validate_config(config["data_config"], DataConfig)
+        first_batch = data_config.to_data_container().get_first_batch(data_root_path=data_root)[0]
         first_batch = tensor_data_to_device(first_batch, device=device)
         batch_size = first_batch["input_ids"].shape[0]
-        seqlen = seqlens[model_type]
+        # get max sequence length
+        model_name = model.hf_config.model_name
+        seqlen = get_model_max_length(model_name, fail_on_not_found=True)
 
         # load model
         pytorch_model = model.load_model()
@@ -129,8 +137,8 @@ class TorchTRTConversion(Pass):
 
             # add forward hook to submodules in layer
             def get_handler(layer_idx, submodule_name):
-                def handler(_, input, output):
-                    layer_info[layer_idx]["input_shapes"][submodule_name] = input[0].shape
+                def handler(_, inputs, output):
+                    layer_info[layer_idx]["input_shapes"][submodule_name] = inputs[0].shape
 
                 return handler
 
@@ -151,23 +159,19 @@ class TorchTRTConversion(Pass):
         for layer_index, info in layer_info.items():
             logger.debug(f"Converting layer {layer_index}...")
             for name, shape in info["input_shapes"].items():
-                input = torch.zeros(shape, dtype=torch.float16, device=device)
+                inputs = torch.zeros(shape, dtype=torch.float16, device=device)
                 # create trt module
-                trt_module = compile_trt_model(info["submodules"][name], input, batch_size, seqlen)
+                trt_module = compile_trt_model(info["submodules"][name], inputs, batch_size, seqlen)
                 # get parent module
                 parent_name = ".".join(name.split(".")[:-1])
-                parent_module = (
-                    _get_attr(layers[layer_index], ".".join(name.split(".")[:-1]))
-                    if parent_name
-                    else layers[layer_index]
-                )
+                parent_module = get_attr(layers[layer_index], parent_name)
                 # get submodule name
                 module_name = name.split(".")[-1]
                 # replace submodule with trt module
                 setattr(parent_module, module_name, trt_module)
                 # remove submodule from layer_info
                 del info["submodules"][name]
-                # TODO: is the empty cache necessary? does it add processing time?
+                # TODO(jambayk): is the empty cache necessary? does it add processing time?
                 # torch.cuda.empty_cache()
                 # gc.collect()
 

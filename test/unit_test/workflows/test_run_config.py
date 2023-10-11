@@ -9,11 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
-from olive.workflows.run.config import INPUT_MODEL_DATA_CONFIG_NAME, RunConfig
+from olive.data.config import DataConfig
+from olive.workflows.run.config import INPUT_MODEL_DATA_CONFIG, RunConfig
 
 
 class TestRunConfig:
-    # TODO: add more tests for different config files to test olive features
+    # TODO(jiapli): add more tests for different config files to test olive features
     # like: Systems/Evaluation/Model and etc.
     @pytest.fixture(autouse=True)
     def setup(self):
@@ -36,7 +37,7 @@ class TestRunConfig:
 
     @pytest.mark.parametrize("system", ["local_system", "azureml_system"])
     def test_user_script_config(self, system):
-        with open(self.user_script_config_file, "r") as f:
+        with self.user_script_config_file.open() as f:
             user_script_config = json.load(f)
 
         user_script_config["engine"]["host"] = system
@@ -46,7 +47,7 @@ class TestRunConfig:
             assert metric.user_config.data_dir.get_path().startswith("azureml://")
 
     def test_config_without_azureml_config(self):
-        with open(self.user_script_config_file, "r") as f:
+        with self.user_script_config_file.open() as f:
             user_script_config = json.load(f)
 
         user_script_config.pop("azureml_client")
@@ -87,17 +88,16 @@ class TestRunConfig:
         ],
     )
     def test_config_with_azureml_default_auth_params(self, default_auth_params):
-        """
-        default_auth_params[0] is a dict of the parameters to be passed to DefaultAzureCredential
+        """default_auth_params[0] is a dict of the parameters to be passed to DefaultAzureCredential.
 
         default_auth_params[1] is a tuple of the number of times each credential is called.
         the order is totally same with that in DefaultAzureCredential where the credentials
         are called sequentially until one of them succeeds:
             EnvironmentCredential -> ManagedIdentityCredential -> SharedTokenCacheCredential
             -> AzureCliCredential -> AzurePowerShellCredential -> InteractiveBrowserCredential
-        https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential?view=azure-python # noqa: E501
+        https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential?view=azure-python
         """
-        with open(self.user_script_config_file, "r") as f:
+        with self.user_script_config_file.open() as f:
             user_script_config = json.load(f)
 
         user_script_config["azureml_client"]["default_auth_params"] = default_auth_params[0]
@@ -116,7 +116,7 @@ class TestRunConfig:
     @patch("azure.identity.InteractiveBrowserCredential")
     def test_config_with_failed_azureml_default_auth(self, mocked_interactive_login, mocked_default_azure_credential):
         mocked_default_azure_credential.side_effect = Exception("mock error")
-        with open(self.user_script_config_file, "r") as f:
+        with self.user_script_config_file.open() as f:
             user_script_config = json.load(f)
         config = RunConfig.parse_obj(user_script_config)
         config.azureml_client.create_client()
@@ -124,7 +124,7 @@ class TestRunConfig:
 
     def test_readymade_system(self):
         readymade_config_file = Path(__file__).parent / "mock_data" / "readymade_system.json"
-        with open(readymade_config_file, "r") as f:
+        with readymade_config_file.open() as f:
             user_script_config = json.load(f)
 
         cfg = RunConfig.parse_obj(user_script_config)
@@ -141,7 +141,7 @@ class TestDataConfigValidation:
                     "hf_config": {
                         "model_name": "dummy_model",
                         "task": "dummy_task",
-                        "dataset": {"name": "dumy_dataset"},
+                        "dataset": {"name": "dummy_dataset"},
                     }
                 },
             },
@@ -152,7 +152,7 @@ class TestDataConfigValidation:
                     "params_config": {
                         "model_name": "dummy_model2",
                         "task": "dummy_task2",
-                        "dataset_name": "dumy_dataset2",
+                        "dataset_name": "dummy_dataset2",
                     },
                 }
             },
@@ -182,13 +182,16 @@ class TestDataConfigValidation:
         assert run_config.data_configs["dummy_data_config2"].params_config["task"] == expected_task
 
     @pytest.mark.parametrize(
-        "data_config,expected_name",
-        [(None, INPUT_MODEL_DATA_CONFIG_NAME), ("dummy_data_config2", "dummy_data_config2")],
+        "data_config_str",
+        [None, INPUT_MODEL_DATA_CONFIG, "dummy_data_config2"],
     )
-    def test_str_to_data_config(self, data_config, expected_name):
+    def test_str_to_data_config(self, data_config_str):
         config_dict = self.template.copy()
-        config_dict["passes"]["tuning"]["config"] = {"data_config": data_config}
+        config_dict["passes"]["tuning"]["config"] = {"data_config": data_config_str}
 
         run_config = RunConfig.parse_obj(config_dict)
-        # print(run_config.passes["tuning"])
-        assert run_config.passes["tuning"].config["data_config"].name == expected_name
+        pass_data_config = run_config.passes["tuning"].config["data_config"]
+        if data_config_str is None:
+            assert pass_data_config is None
+        else:
+            assert isinstance(pass_data_config, DataConfig) and pass_data_config.name == data_config_str

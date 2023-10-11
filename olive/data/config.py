@@ -2,8 +2,8 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
-import copy
 import logging
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Union
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 class DataComponentConfig(ConfigBase):
     name: str = None
-    type: str = None
+    type: str = None  # noqa: A003
     params: Dict = None
 
 
@@ -34,7 +34,7 @@ DefaultDataComponentCombos = {
 
 class DataConfig(ConfigBase):
     name: str = DefaultDataContainer.DATA_CONTAINER.value
-    type: str = DefaultDataContainer.DATA_CONTAINER.value
+    type: str = DefaultDataContainer.DATA_CONTAINER.value  # noqa: A003
 
     # used to store the params for each component
     params_config: Dict = None
@@ -60,28 +60,28 @@ class DataConfig(ConfigBase):
         self.fill_in_params()
 
     def update_components(self):
-        """
-        Update the components in the data config with default_components if user do not provide.
-        """
+        """Update the components in the data config with default_components if user do not provide."""
         self.components = self.components or {}
         self.default_components = self.default_components or {}
         self._update_default_component_type()
         self._update_default_component()
         for k, v in self.default_components.items():
+            # do deepcopies here since we don't want to update the default_components
             if k not in self.components:
-                self.components[k] = v
+                # v is a DataComponentConfig object, so we deepcopy it
+                self.components[k] = deepcopy(v)
             else:
+                # both are strings, so we don't need to deepcopy
                 self.components[k].type = self.components[k].type or v.type
                 self.components[k].name = self.components[k].name or v.name
-                self.components[k].params = self.components[k].params or v.params
+                # v.params is a dict, so we deepcopy it
+                self.components[k].params = self.components[k].params or deepcopy(v.params)
 
     def _update_default_component_type(self):
-        """
-        Resolve the default component type.
-        """
+        """Resolve the default component type."""
         dc_cls = Registry.get_container(self.type)
         # deepcopy dc_cls.default_components_type since we don't want to update dc_cls.default_components_type
-        self.default_components_type = copy.deepcopy(dc_cls.default_components_type) or {}
+        self.default_components_type = deepcopy(dc_cls.default_components_type) or {}
         # 1. update default_components_type with task_type for huggingface case
         self._update_default_component_type_with_task_type(dc_cls)
         # 2. update default_components_type with DefaultDataComponentCombos
@@ -91,39 +91,45 @@ class DataConfig(ConfigBase):
                 self.default_components_type[k] = v
 
     def _update_default_component(self):
-        """
-        Resolve the default component type.
-        """
+        """Resolve the default component type."""
         for k, v in self.default_components_type.items():
             self.default_components[k] = DataComponentConfig(type=v, name=v, params={})
 
     def fill_in_params(self):
-        """
-        Fill in the default parameters for each component.
-        1. If params_config["component_kwargs"] is not None, use the params_config["component_kwargs"]
-        to update component.params
-        2. if params_config is not None, use the params_config to fill in the params. Overrides the
-        component.params
-        3. if params_config is None, use the default params from the function signature
-        4. if there is already define params under the component, use the params directly
+        """Fill in the default parameters for each component.
+
+        For each component, we will do the following steps:
+            1. If params_config["component_kwargs"] is not None, use the params_config["component_kwargs"]
+            to update component.params. Higher priority than the following steps.
+        Loop over the parameters from the function signature of the component:
+            2. If defined in params_config, use it to fill in the params
+            3. Else if already defined in component.params, use it directly
+            4. Else Use the default value from the function signature
+
+        Priority is: component_kwargs > params_config > component.params > default value
         """
         from inspect import signature
 
-        self.params_config = self.params_config or {}
+        self.params_config = deepcopy(self.params_config) or {}
         component_kwargs = self.params_config.pop("component_kwargs", {})
         for k, v in self.components.items():
             component = Registry.get_component(k, v.type)
             # 1. use the params_config["component_kwargs"] to update component.params
-            if k in component_kwargs:
-                v.params.update(component_kwargs[k])
-            # 2. user function signature to fill params firstly
+            v.params.update(component_kwargs.get(k, {}))
             params = signature(component).parameters
             for param, info in params.items():
-                # 3. override the params with params_config
+                # 1. skip the params already defined in component_kwargs
+                if param in component_kwargs.get(k, {}):
+                    continue
+                # 2. Update the param using params_config
                 if param in self.params_config:
                     v.params[param] = self.params_config[param]
                     continue
-                # 4. if it already defined params under the component, use the params directly
+                # 3. Use value from component.params if already defined
+                # 4. Use the default value from the function signature
+                # TRICKY TRICKY TRICKY by myguo: not change the preprocess parameter by removing the leading underscore.
+                # for example, change _dataset to dataset will trigger bug.
+                # I did hit the issue. So I add this check here.
                 if param not in v.params and not param.startswith("_"):
                     if info.kind == info.VAR_POSITIONAL or info.kind == info.VAR_KEYWORD:
                         continue
@@ -134,24 +140,18 @@ class DataConfig(ConfigBase):
                         v.params[param] = params[param].default
 
     def get_components_params(self):
-        """
-        Get the parameters from data config.
-        """
+        """Get the parameters from data config."""
         return {k: v.params for k, v in self.components.items()}
 
     @property
     def load_dataset(self):
-        """
-        Get the dataset from data config.
-        """
+        """Get the dataset from data config."""
         name = self.components[DataComponentType.LOAD_DATASET.value].type or DefaultDataComponent.LOAD_DATASET.value
         return Registry.get_load_dataset_component(name)
 
     @property
     def pre_process(self):
-        """
-        Get the pre-process from data config.
-        """
+        """Get the pre-process from data config."""
         name = (
             self.components[DataComponentType.PRE_PROCESS_DATA.value].type
             or DefaultDataComponent.PRE_PROCESS_DATA.value
@@ -160,9 +160,7 @@ class DataConfig(ConfigBase):
 
     @property
     def post_process(self):
-        """
-        Get the post-process from data config.
-        """
+        """Get the post-process from data config."""
         name = (
             self.components[DataComponentType.POST_PROCESS_DATA.value].type
             or DefaultDataComponent.POST_PROCESS_DATA.value
@@ -171,44 +169,32 @@ class DataConfig(ConfigBase):
 
     @property
     def dataloader(self):
-        """
-        Get the dataloader from data config.
-        """
+        """Get the dataloader from data config."""
         name = self.components[DataComponentType.DATALOADER.value].type or DefaultDataComponent.DATALOADER.value
         return Registry.get_dataloader_component(name)
 
     @property
     def load_dataset_params(self):
-        """
-        Get the parameters from dataset.
-        """
+        """Get the parameters from dataset."""
         return self.components[DataComponentType.LOAD_DATASET.value].params
 
     @property
     def pre_process_params(self):
-        """
-        Get the parameters from pre-process.
-        """
+        """Get the parameters from pre-process."""
         return self.components[DataComponentType.PRE_PROCESS_DATA.value].params
 
     @property
     def post_process_params(self):
-        """
-        Get the parameters from post-process.
-        """
+        """Get the parameters from post-process."""
         return self.components[DataComponentType.POST_PROCESS_DATA.value].params
 
     @property
     def dataloader_params(self):
-        """
-        Get the parameters from dataloader.
-        """
+        """Get the parameters from dataloader."""
         return self.components[DataComponentType.DATALOADER.value].params
 
     def to_data_container(self) -> "DataContainer":
-        """
-        Convert the data config to the data container.
-        """
+        """Convert the data config to the data container."""
         dc_cls = Registry.get_container(self.type)
         return dc_cls(config=self)
 

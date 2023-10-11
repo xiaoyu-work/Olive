@@ -1,3 +1,7 @@
+# -------------------------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+# --------------------------------------------------------------------------
 from pathlib import Path
 
 import numpy as np
@@ -39,8 +43,7 @@ class MobileNetCalibrationDataReader(CalibrationDataReader):
         except StopIteration:
             return None
 
-        batch = {k: v.detach().cpu().numpy() for k, v in batch.items()}
-        return batch
+        return {k: v.detach().cpu().numpy() for k, v in batch.items()}
 
     def rewind(self):
         self.iter = None
