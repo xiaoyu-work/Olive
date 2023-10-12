@@ -521,7 +521,6 @@ class OnnxMatMulWeight4Quantizer(Pass):
             "quant_bin_path": PassConfigParam(
                 type_=str,
                 default_value="",
-                required=True,
                 description=(
                     "Currently quantization code is implemented in a separate binary"
                     "(onnxruntime_mlas_q4dq) that is compiled with Onnxruntime native code."
@@ -556,7 +555,7 @@ class OnnxMatMulWeight4Quantizer(Pass):
         return model_proto_to_olive_model(onnx_model, output_model_path, config)
 
 
-class OnnxLlamaMatMulWeight4Quantizer(Pass):
+class OnnxMatMul4Quantizer(Pass):
     @staticmethod
     def _default_config(accelerator_spec: AcceleratorSpec) -> Dict[str, PassConfigParam]:
         config = {
@@ -585,12 +584,13 @@ class OnnxLlamaMatMulWeight4Quantizer(Pass):
         from onnxruntime import __version__ as OrtVersion
 
         # TODO(trajep): merge with OnnxMatMulWeight4Quantizer while the code for llama2 is in main branch
+        # currently only work with https://github.com/microsoft/onnxruntime/commits/kvaishnavi/llama_int4_gqa
         if version.parse(OrtVersion) < version.parse("1.17.0"):
             raise OlivePassError("OnnxLlamaMatMulWeight4Quantizer is only supported in onnxruntime >= 1.17.0")
 
-        from onnxruntime.quantization.matmul_weight4_quantizer import MatMulWeight4Quantizer
+        from onnxruntime.quantization.matmul_4bits_quantizer import MatMul4BitsQuantizer
 
-        quant = MatMulWeight4Quantizer(
+        quant = MatMul4BitsQuantizer(
             model.load_model(), config["block_size"], config["symmetric"], config["nodes_to_exclude"]
         )
         quant.process()

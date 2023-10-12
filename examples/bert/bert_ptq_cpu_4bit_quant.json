@@ -47,13 +47,17 @@
         "transformers_optimization": {
             "type": "OrtTransformersOptimization"
         },
+        "4bit_weights_quantization": {
+            "type": "OnnxMatMulWeight4Quantizer"
+        },
         "4bit_quantization": {
-            "type": "OnnxMatMulWeight4Quantizer",
-            "config": {
-                "quant_bin_path": ""
-            }
+            "type": "OnnxMatMul4Quantizer"
         }
     },
+    "pass_flows": [
+        ["conversion", "transformers_optimization", "4bit_weights_quantization"],
+        ["conversion", "transformers_optimization", "4bit_quantization"]
+    ],
     "engine": {
         "search_strategy": {
             "execution_order": "joint",
