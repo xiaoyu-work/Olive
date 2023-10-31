@@ -542,6 +542,7 @@ class PyTorchModel(OliveModel):
         return self.get_resource("model_script")
 
     def load_model(self, rank: int = None) -> torch.nn.Module:
+        print("loading the model")
         if self.model is not None:
             return self.model
 
@@ -744,6 +745,81 @@ class PyTorchModel(OliveModel):
         config["config"]["model_attributes"] = model_attributes or None
         return serialize_to_json(config, check_object)
 
+class DistributedPyTorchModel(PyTorchModel):
+    resource_keys: ClassVar[list] = ["model_paths"]
+
+    def __init__(
+        self,
+        # TODO : handle OLIVE_RESOURCE_ANNOTATIONS for model_paths
+        model_paths: List[Union[Path, str]] = None,
+        model_file_format: ModelFileFormat = ModelFileFormat.PYTORCH_ENTIRE_MODEL,
+        model_loader: Union[str, Callable] = None,
+        model_script: Union[str, Path] = None,
+        script_dir: Union[str, Path] = None,
+        io_config: Union[Dict[str, Any], IOConfig, str] = None,
+        dummy_inputs_func: Union[str, Callable] = None,
+        hf_config: Union[Dict[str, Any], HFConfig] = None,
+        adapter_path: OLIVE_RESOURCE_ANNOTATIONS = None,
+        model_attributes: Optional[Dict[str, Any]] = None,
+    ):
+
+        super().__init__(
+            model_path=None,
+            model_file_format=model_file_format,
+            model_loader=model_loader,
+            model_script=model_script,
+            script_dir=script_dir,
+            io_config=io_config,
+            dummy_inputs_func=dummy_inputs_func,
+            hf_config=hf_config,
+            adapter_path=adapter_path,
+            model_attributes=model_attributes,
+        )
+        self.model_paths = model_paths or []
+
+    @property
+    def ranks(self):
+        return len(self.model_paths)
+
+    def ranked_model_path(self, rank: int) -> Union[Path, str]:
+        return self.model_paths[rank]
+
+    def load_model(self, rank: int = None) -> ONNXModel:
+        return super.load_model(self.model_paths[rank])
+
+    def prepare_session(
+        self,
+        inference_settings: Optional[Dict[str, Any]] = None,
+        device: Device = Device.GPU,  # pylint: disable=signature-differs
+        execution_providers: Union[str, List[str]] = None,
+        rank: Optional[int] = 0,
+    ):
+        return self.load_model().eval()
+
+    @staticmethod
+    def to_json(self, check_object: bool = False):
+        config = super().to_json(check_object)
+        config["config"].update(
+            {
+                "model_paths": self.model_paths,
+                "model_file_format": self.model_file_format,
+                "model_loader": self.model_loader,
+                "io_config": self.io_config,
+                "dummy_inputs_func": self.dummy_inputs_func,
+                "hf_config": self.hf_config,
+            }
+        )
+        # clean up redundant information in model_attributes
+        config["config"].pop("model_attributes", None)
+        # using a copy of self.model_attributes since config["config"]["model_attributes"] is already
+        # serialized and might not match self.model_attributes
+        model_attributes = deepcopy(self.model_attributes)
+        if model_attributes and self.hf_config:
+            for key, value in self.get_hf_model_config().to_dict().items():
+                if key in model_attributes and model_attributes[key] == value:
+                    del model_attributes[key]
+        config["config"]["model_attributes"] = model_attributes or None
+        return serialize_to_json(config, check_object)
 
 class OptimumModel(PyTorchModel):
     def __init__(self, model_components: List[str], **kwargs):
