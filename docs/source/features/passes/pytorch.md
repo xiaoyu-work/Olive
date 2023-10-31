@@ -126,3 +126,13 @@ This pass only supports Hugging Face transformers PyTorch models. Please refer t
     "type": "TorchTRTConversion"
 }
 ```
+## LlamaPyTorchTensorParallel
+`LlamaPyTorchTensorParallel` parallelizes Llama model using Tensor Parallel technique.ed by TensorRT.
+This pass only supports Hugging Face Llama models.
+
+### Example Configuration
+```json
+{
+    "world_size": 8
+}
+```
