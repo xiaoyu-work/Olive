@@ -33,10 +33,10 @@ class PyTorchTensorParallel(Pass):
         # 2. Replace the layers
         self.replace_layers()
         # 3. Split the weights
-        self.split_weights(pytorch_model, self.world_size)
+        self.split_weights(pytorch_model)
         # 4. Save the weights for each rank
         for r in self.world_size:
-            self.load_rank_weights(pytorch_model, r, self.world_size)
+            self.load_rank_weights(pytorch_model, r)
             output_filepath = str(output_model_path / f"{r:02d}")
             pytorch_model.save_pretrained(output_filepath)
         # 5. Restore layers that were replaced

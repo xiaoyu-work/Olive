@@ -217,7 +217,7 @@ class LlamaPyTorchTensorParallel(Pass):
             if isinstance(the_model, (TensorParallelColumnLinear, TensorParallelRowLinear, LlamaAttention)):
                 the_model.parallel_split(ws)
             for m in the_model._modules.values():
-                _split_model(m)
+                _split_model(m, self.world_size)
 
         _split_model(the_model, self.world_size)
 
