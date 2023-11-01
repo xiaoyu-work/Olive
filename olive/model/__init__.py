@@ -745,12 +745,13 @@ class PyTorchModel(OliveModel):
         config["config"]["model_attributes"] = model_attributes or None
         return serialize_to_json(config, check_object)
 
+
 class DistributedPyTorchModel(PyTorchModel):
     resource_keys: ClassVar[list] = ["model_paths"]
 
     def __init__(
         self,
-        # TODO : handle OLIVE_RESOURCE_ANNOTATIONS for model_paths
+        # Note : handle OLIVE_RESOURCE_ANNOTATIONS for model_paths
         model_paths: List[Union[Path, str]] = None,
         model_file_format: ModelFileFormat = ModelFileFormat.PYTORCH_ENTIRE_MODEL,
         model_loader: Union[str, Callable] = None,
@@ -762,7 +763,6 @@ class DistributedPyTorchModel(PyTorchModel):
         adapter_path: OLIVE_RESOURCE_ANNOTATIONS = None,
         model_attributes: Optional[Dict[str, Any]] = None,
     ):
-
         super().__init__(
             model_path=None,
             model_file_format=model_file_format,
@@ -820,6 +820,7 @@ class DistributedPyTorchModel(PyTorchModel):
                     del model_attributes[key]
         config["config"]["model_attributes"] = model_attributes or None
         return serialize_to_json(config, check_object)
+
 
 class OptimumModel(PyTorchModel):
     def __init__(self, model_components: List[str], **kwargs):

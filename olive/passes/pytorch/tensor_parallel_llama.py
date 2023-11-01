@@ -6,33 +6,20 @@
 # --------------------------------------------------------------------------
 
 import logging
-from typing import Any, Dict, Optional, Tuple
 import math
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
-import transformers
-
-from olive.hardware.accelerator import AcceleratorSpec, Device
-from olive.model import PyTorchModel, DistributedPyTorchModel
-from olive.passes import Pass
-from olive.passes.olive_pass import PassConfigParam
-
-from transformers.models.llama.modeling_llama import (
-    LlamaAttention,
-    LlamaMLP,
-    LlamaForCausalLM,
-    rotate_half,
-    repeat_kv,
-)
+from tensor_parallel_layers import TensorParallelColumnLinear, TensorParallelRowLinear
 from transformers.activations import ACT2FN
+from transformers.models.llama.modeling_llama import LlamaAttention, LlamaMLP, repeat_kv, rotate_half
 
-from tensor_parallel_layers import (
-    TensorParallelColumnLinear,
-    TensorParallelRowLinear
-)
+from olive.model import DistributedPyTorchModel, PyTorchModel
+from olive.passes import Pass
 
 logger = logging.getLogger(__name__)
+
 
 # Tensor Parallel layers. This layers will replace corresponding layer in the model.
 def tp_llama_mlp_init(self, config):
@@ -41,7 +28,7 @@ def tp_llama_mlp_init(self, config):
     self.hidden_size = config.hidden_size
     self.intermediate_size = config.intermediate_size
 
-    ## Original
+    # Original
     # self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
     # self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
     # self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
@@ -50,6 +37,7 @@ def tp_llama_mlp_init(self, config):
     self.down_proj = TensorParallelRowLinear(self.intermediate_size, self.hidden_size, bias=False)
 
     self.act_fn = ACT2FN[config.hidden_act]
+
 
 def tp_llama_attention_init(self, config):
     super(LlamaAttention, self).__init__()
@@ -80,11 +68,12 @@ def tp_llama_attention_init(self, config):
 
     self._init_rope()
 
-## Overwrite original functions
+
+# Overwrite original functions
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
     # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
 
-    ## Original
+    # Original
     # cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
     # sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
     # Workaround: rewrite the above to avoid exporting `If` node
@@ -96,6 +85,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
+
 
 def tp_llama_attention_forward(
     self,
@@ -176,7 +166,7 @@ def tp_llama_attention_forward(
         )
 
     attn_output = attn_output.transpose(1, 2).contiguous()
-    ## Original
+    # Original
     # attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
     attn_output = attn_output.reshape(bsz, q_len, -1)
 
@@ -192,9 +182,11 @@ def tp_llama_attention_forward(
 
     return attn_output, attn_weights, past_key_value
 
+
 def tp_llama_attention_parallel_split(self, r, ws):
     self.num_heads = self.num_heads // ws
     self.num_key_value_heads = self.num_key_value_heads // ws
+
 
 class LlamaPyTorchTensorParallel(Pass):
     def __init__(self):
@@ -207,7 +199,7 @@ class LlamaPyTorchTensorParallel(Pass):
         self, model: PyTorchModel, data_root: str, config: Dict[str, Any], output_model_path: str
     ) -> DistributedPyTorchModel:
         return super()._run_for_config(model, data_root, config, output_model_path)
-    
+
     def replace_layers(self):
         LlamaMLP.__init__ = tp_llama_mlp_init
         LlamaAttention.__init__ = tp_llama_attention_init
@@ -224,14 +216,16 @@ class LlamaPyTorchTensorParallel(Pass):
         def _split_model(the_model, ws):
             if isinstance(the_model, (TensorParallelColumnLinear, TensorParallelRowLinear, LlamaAttention)):
                 the_model.parallel_split(ws)
-            for _, m in the_model._modules.items():
+            for m in the_model._modules.values():
                 _split_model(m)
+
         _split_model(the_model, self.world_size)
 
     def load_rank_weights(self, the_model, rank):
         def _load_rank_weights(the_model, r, ws):
             if isinstance(the_model, (TensorParallelColumnLinear, TensorParallelRowLinear, LlamaAttention)):
                 the_model.load_rank_weights(r, ws)
-            for _, m in the_model._modules.items():
-                _load_rank_weights(m, r,ws)
+            for m in the_model._modules.values():
+                _load_rank_weights(m, r, ws)
+
         _load_rank_weights(the_model, rank, self.world_size)

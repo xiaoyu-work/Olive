@@ -2,16 +2,17 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
-# Tensor Parallel layers. 
+# Tensor Parallel layers.
 # This layers could replace corresponding PyTorch layers.
 # --------------------------------------------------------------------------
 
+import math
+
 import torch
 import torch.distributed as dist
-from torch.distributed.distributed_c10d import _get_default_group
 import torch.nn.functional as F
 from torch import nn
-import math
+from torch.distributed.distributed_c10d import _get_default_group
 
 
 class AllReduce(torch.autograd.Function):
@@ -64,7 +65,7 @@ class TensorParallelColumnLinear(nn.Module):
     def parallel_split(self, world_size):
         if world_size == 1:
             return
-        
+
         assert self.out_features % world_size == 0
         # Split weights in multiple chunks.
         # This could be optimized
@@ -79,7 +80,7 @@ class TensorParallelColumnLinear(nn.Module):
             self.bias = nn.Parameter(self.rank_biases[rank])
 
     def reset_parameters(self) -> None:
-        """From `torch.nn.Linear`"""
+        # From `torch.nn.Linear`
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
         # https://github.com/pytorch/pytorch/issues/57109
@@ -90,14 +91,13 @@ class TensorParallelColumnLinear(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self) -> str:
-        """From `torch.nn.Linear`"""
+        # From `torch.nn.Linear`
         return "in_features={}, out_features={}, bias={}".format(
             self.in_features, self.out_features, self.bias is not None
         )
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = F.linear(input, weight=self.weight, bias=self.bias)
-        return out
+    def forward(self, ip: torch.Tensor) -> torch.Tensor:
+        return F.linear(ip, weight=self.weight, bias=self.bias)
 
 
 class TensorParallelRowLinear(nn.Module):
@@ -139,7 +139,7 @@ class TensorParallelRowLinear(nn.Module):
         self.weight = nn.Parameter(self.rank_weights[rank])
 
     def reset_parameters(self) -> None:
-        """From `torch.nn.Linear`"""
+        # From `torch.nn.Linear`
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
         # https://github.com/pytorch/pytorch/issues/57109
@@ -149,14 +149,12 @@ class TensorParallelRowLinear(nn.Module):
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = F.linear(input, weight=self.weight, bias=self.bias)
-        out = AllReduce.apply(out)
-
-        return out
+    def forward(self, ip: torch.Tensor) -> torch.Tensor:
+        out = F.linear(ip, weight=self.weight, bias=self.bias)
+        return AllReduce.apply(out)
 
     def extra_repr(self) -> str:
-        """From `torch.nn.Linear`"""
+        # From `torch.nn.Linear`
         return "in_features={}, out_features={}, bias={}".format(
             self.in_features, self.out_features, self.bias is not None
         )

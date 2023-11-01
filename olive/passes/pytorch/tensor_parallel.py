@@ -8,29 +8,24 @@
 import logging
 from typing import Any, Dict
 
-import torch
-import transformers
-
-from olive.hardware.accelerator import AcceleratorSpec, Device
-from olive.model import PyTorchModel, DistributedPyTorchModel
+from olive.hardware.accelerator import AcceleratorSpec
+from olive.model import DistributedPyTorchModel, PyTorchModel
 from olive.passes import Pass
 from olive.passes.olive_pass import PassConfigParam
 
 logger = logging.getLogger(__name__)
 
-class PyTorchTensorParallel(Pass):
 
+class PyTorchTensorParallel(Pass):
     @staticmethod
     def _default_config(accelerator_spec: AcceleratorSpec) -> Dict[str, PassConfigParam]:
-        # TODO : The default world_size should be the no of gpus (AceleratorSpec.Device == GPU) in the target OliveSystem
-        return {
-            "world_size": PassConfigParam(type_=int, default_value=0, description="world size")
-        }
+        # Note : The default world_size should be the no of gpus (AceleratorSpec.Device == GPU)
+        # in the target OliveSystem
+        return {"world_size": PassConfigParam(type_=int, default_value=0, description="world size")}
 
     def _run_for_config(
         self, model: PyTorchModel, data_root: str, config: Dict[str, Any], output_model_path: str
     ) -> DistributedPyTorchModel:
-        
         self.world_size = config["world_size"]
 
         # 1. Load the model
@@ -52,17 +47,15 @@ class PyTorchTensorParallel(Pass):
         model_config = model.to_json()["config"]
         model_config["model_paths"] = output_model_path
         return DistributedPyTorchModel(**model_config)
-    
+
     def replace_layers(self):
         raise NotImplementedError
-    
+
     def restore_layers(self):
         raise NotImplementedError
-    
+
     def split_weights(self, m):
         raise NotImplementedError
-    
+
     def load_rank_weights(self, r, ws):
         raise NotImplementedError
-
-
