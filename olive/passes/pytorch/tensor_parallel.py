@@ -46,6 +46,7 @@ class PyTorchTensorParallel(Pass):
         # return PyTorchModel with updated model path
         model_config = model.to_json()["config"]
         model_config["model_paths"] = output_model_path
+        model_config["world_size"] = self.world_size
         return DistributedPyTorchModel(**model_config)
 
     def replace_layers(self):
