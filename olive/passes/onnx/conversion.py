@@ -56,7 +56,9 @@ class OnnxConversion(Pass):
     def _run_for_config(
         self, model: PyTorchModel, data_root: str, config: Dict[str, Any], output_model_path: str
     ) -> Union[ONNXModel, CompositeOnnxModel]:
-        return self._convert_model_on_device(model, data_root, config, output_model_path, "cpu")
+        converted_onnx_model = self._convert_model_on_device(model, data_root, config, output_model_path, "cpu")
+        # save the model to the output path and return the model
+        return model_proto_to_olive_model(converted_onnx_model, output_model_path, config)
 
     def _convert_model_on_device(
         self,
@@ -198,7 +200,7 @@ class OnnxConversion(Pass):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         # save the model to the output path and return the model
-        return model_proto_to_olive_model(onnx_model, output_model_path, config)
+        return onnx_model
 
 
 class DeviceSpecificOnnxConversion(OnnxConversion):
