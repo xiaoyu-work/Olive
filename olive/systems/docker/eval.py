@@ -14,7 +14,7 @@ from olive.model import ModelConfig
 logger = logging.getLogger(__name__)
 
 
-def evaluate_entry(config, output_path, output_name, accelerator_type, execution_provider):
+def evaluate_entry(config, output_path, output_name, accelerator_type, device_id, execution_provider):
     with open(config) as f:  # noqa: PTH123
         config_json = json.load(f)
     evaluator_config = OliveEvaluatorConfig(metrics=config_json["metrics"])
@@ -24,7 +24,12 @@ def evaluate_entry(config, output_path, output_name, accelerator_type, execution
 
     evaluator: OliveEvaluator = OliveEvaluatorFactory.create_evaluator_for_model(model)
     metrics_res = evaluator.evaluate(
-        model, None, evaluator_config.metrics, device=accelerator_type, execution_providers=execution_provider
+        model,
+        None,
+        evaluator_config.metrics,
+        device=accelerator_type,
+        device_id=device_id,
+        execution_providers=execution_provider,
     )
 
     with open(os.path.join(output_path, f"{output_name}"), "w") as f:  # noqa: PTH123
@@ -40,6 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", help="Path of output model")
     parser.add_argument("--output_name", help="Name of output json file")
     parser.add_argument("--accelerator_type", type=str, help="accelerator type")
+    parser.add_argument("--device_id", type=str, help="device id")
     parser.add_argument("--execution_provider", type=str, help="execution provider")
 
     args, _ = parser.parse_known_args()

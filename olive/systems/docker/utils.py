@@ -43,6 +43,7 @@ def create_evaluate_command(
         f"--output_path {output_path}",
         f"--output_name {output_name}",
         f"--accelerator_type {accelerator.accelerator_type}",
+        f"--device_id {accelerator.device_id}",
         f"--execution_provider {accelerator.execution_provider}",
     ]
     return f"python {eval_script_path} {' '.join(parameters)}"
