@@ -107,6 +107,34 @@ python -m olive.workflows.run --config lamma2_qlora.json
 1. cpu info:  Intel(R) Xeon(R) Platinum 8168 CPU @ 2.70GHz
 2. int4 is not fully optimized for inference as of now.
 
+## Run ORT benchmark scripts
+Olive optimization will get the following performance numbers compared with the original model. The `model_id` is the key to find the model path under `cache/models` folder.
+
+For example, the `model_id` for converted onnx model is `0_OnnxConversion-9c613cf5a3a7889334607d66edfc3f92-872e8136ef87d0dcf3861a62f1fd34e5`, then the model is located at `cache/models/0_OnnxConversion-9c613cf5a3a7889334607d66edfc3f92-872e8136ef87d0dcf3861a62f1fd34e5/model.onnx`.
+
+CPU results:
+![llama_cpu.png](pic/llama_cpu.png)
+
+GPU results:
+![llama_cuda.png](pic/llama_cuda.png)
+
+
+After that you can find the model path and run the ort benchmark script to get the performance numbers.
+When choosing the different model ids, please select the corresponding `--precision` and `--device` as the red text in above pictures.
+
+```bash
+python -m onnxruntime.transformers.models.llama.benchmark \
+    --benchmark-type ort-convert-to-onnx \
+    # change the model_id
+    --ort-model-path cache/models/model_id/model.onnx \
+    --model-name meta-llama/Llama-2-7b-hf \
+    # fp32, fp16, int8, int4
+    --precision fp16 \
+    --batch-sizes "1 2" \
+    --sequence-lengths "8 16" \
+    # cpu, cuda
+    --device cuda
+```
 
 ## TODO
 - [ ] Add generation example of the optimized model.
