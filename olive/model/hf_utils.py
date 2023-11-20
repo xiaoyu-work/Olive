@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import torch
 import transformers
 from pydantic import Field, validator
-from transformers import AutoConfig, AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer, GenerationConfig
 
 from olive.common.config_utils import ConfigBase, ConfigWithExtraArgs
 from olive.common.utils import resolve_torch_dtype
@@ -211,6 +211,10 @@ class HFConfig(ConfigBase):
     components: List[HFComponent] = None
     dataset: Dict[str, Any] = None
     model_loading_args: HFModelLoadingArgs = None
+    # model_resource_hub is the name of the resource hub to load the model from
+    # if not provided, it will be loaded from the default resource hub
+    # options: transformers, optimum
+    model_resource_hub: str = "transformers"
 
     @validator("model_class", always=True)
     def task_or_model_class_required(cls, v, values):
@@ -227,7 +231,9 @@ class HFConfig(ConfigBase):
         if self.task:
             model = load_huggingface_model_from_task(self.task, model_name_or_path, **loading_args)
         elif self.model_class:
-            model = load_huggingface_model_from_model_class(self.model_class, model_name_or_path, **loading_args)
+            model = load_huggingface_model_from_model_class(
+                self.model_class, model_name_or_path, self.model_resource_hub, **loading_args
+            )
         else:
             raise ValueError("Either task or model_class must be specified")
 
@@ -238,6 +244,11 @@ class HFConfig(ConfigBase):
         model_name_or_path = model_path or self.model_name
         loading_args = self.model_loading_args.get_loading_args() if self.model_loading_args else {}
         return get_hf_model_config(model_name_or_path, **loading_args)
+
+    def load_model_generation_config(self, model_path: str = None):
+        model_name_or_path = model_path or self.model_name
+        loading_args = self.model_loading_args.get_loading_args() if self.model_loading_args else {}
+        return get_hf_model_generative_config(model_name_or_path, **loading_args)
 
 
 def load_huggingface_model_from_task(task: str, name: str, **kwargs):
@@ -272,12 +283,17 @@ def load_huggingface_model_from_task(task: str, name: str, **kwargs):
     return model
 
 
-def huggingface_model_loader(model_loader):
+def huggingface_model_loader(model_loader, model_resource_hub):
     if model_loader is None:
         model_loader = "AutoModel"
     if isinstance(model_loader, str):
         try:
-            model_loader = getattr(transformers, model_loader)
+            if model_resource_hub == "transformers":
+                model_loader = getattr(transformers, model_loader)
+            elif model_resource_hub == "optimum.onnxruntime":
+                import optimum.onnxruntime as optimum_ort
+
+                model_loader = getattr(optimum_ort, model_loader)
         except AttributeError:
             raise AttributeError(f"{model_loader} is not found in transformers") from None
     elif not isinstance(model_loader, Callable):
@@ -291,9 +307,15 @@ def get_hf_model_config(model_name: str, **kwargs):
     return AutoConfig.from_pretrained(model_name, **kwargs)
 
 
-def load_huggingface_model_from_model_class(model_class: str, name: str, **kwargs):
+def get_hf_model_generative_config(model_name: str, **kwargs):
+    return GenerationConfig.from_pretrained(model_name, **kwargs)
+
+
+def load_huggingface_model_from_model_class(
+    model_class: str, name: str, model_resource_hub: str = "transformers", **kwargs
+):
     """Load huggingface model from model_loader and name."""
-    return huggingface_model_loader(model_class)(name, **kwargs)
+    return huggingface_model_loader(model_class, model_resource_hub)(name, **kwargs)
 
 
 # patched version of transforrmers.onnx.features.supported_features_mapping

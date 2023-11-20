@@ -19,7 +19,7 @@ from olive.common.utils import get_package_name_from_ep, run_subprocess
 from olive.engine.footprint import Footprint
 from olive.engine.packaging.packaging_config import PackagingConfig, PackagingType
 from olive.hardware import AcceleratorSpec
-from olive.model import ONNXModel
+from olive.model import CompositeOnnxModel, ONNXModel
 from olive.resource_path import ResourceType, create_resource_path
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def _generate_zipfile_output(
                     footprints[accelerator_spec],
                     pf_footprint,
                     accelerator_spec,
-                    packaging_config.export_in_mlflow_format,
+                    packaging_config.output_model_format,
                 )
         _package_onnxruntime_packages(tempdir, next(iter(pf_footprints.values())))
         shutil.make_archive(packaging_config.name, "zip", tempdir)
@@ -74,7 +74,7 @@ def _package_candidate_models(
     footprint: Footprint,
     pf_footprint: Footprint,
     accelerator_spec: AcceleratorSpec,
-    export_in_mlflow_format=False,
+    output_model_format="onnx",
 ) -> None:
     candidate_models_dir = tempdir / "CandidateModels"
     model_rank = 1
@@ -97,10 +97,13 @@ def _package_candidate_models(
             json.dump(inference_config, f)
 
         # Copy model file
+        model_config = pf_footprint.get_model_config(model_id)
         model_path = pf_footprint.get_model_path(model_id)
         model_resource_path = create_resource_path(model_path) if model_path else None
         model_type = pf_footprint.get_model_type(model_id)
         if model_type == "ONNXModel":
+            # create model
+            model = ONNXModel(**model_config)
             with tempfile.TemporaryDirectory(dir=model_dir, prefix="olive_tmp") as model_tempdir:
                 # save to model_tempdir first since model_path may be a folder
                 temp_resource_path = create_resource_path(model_resource_path.save_to_dir(model_tempdir, "model", True))
@@ -111,9 +114,7 @@ def _package_candidate_models(
                 elif temp_resource_path.type == ResourceType.LocalFolder:
                     # if model_path is a folder, save all files in the folder to model_dir / file_name
                     # file_name for .onnx file is model.onnx, otherwise keep the original file name
-                    model_config = pf_footprint.get_model_config(model_id)
-                    onnx_file_name = model_config.get("onnx_file_name")
-                    onnx_model = ONNXModel(temp_resource_path, onnx_file_name)
+                    onnx_model = ONNXModel(temp_resource_path, model.onnx_file_name)
                     model_name = Path(onnx_model.model_path).name
                     for file in Path(temp_resource_path.get_path()).iterdir():
                         if file.name == model_name:
@@ -121,21 +122,12 @@ def _package_candidate_models(
                         else:
                             file_name = file.name
                         Path(file).rename(model_dir / file_name)
-                if export_in_mlflow_format:
-                    try:
-                        import mlflow
-                    except ImportError:
-                        raise ImportError("Exporting model in MLflow format requires mlflow>=2.4.0") from None
-                    from packaging.version import Version
 
-                    if Version(mlflow.__version__) < Version("2.4.0"):
-                        logger.warning(
-                            "Exporting model in MLflow format requires mlflow>=2.4.0. "
-                            "Skip exporting model in MLflow format."
-                        )
-                    else:
-                        _generate_onnx_mlflow_model(model_dir, inference_config)
-
+                if output_model_format != "raw_onnx":
+                    model.save_model(model_dir, output_model_format)
+        elif model_type == "CompositeOnnxModel":
+            model = CompositeOnnxModel(**model_config)
+            model.save_model(model_dir, output_model_format)
         elif model_type == "OpenVINOModel":
             model_resource_path.save_to_dir(model_dir, "model", True)
         else:
@@ -156,34 +148,6 @@ def _package_candidate_models(
                     "candidate_model_metrics": node.metrics.value.to_json(),
                 }
                 json.dump(metrics, f, indent=4)
-
-
-def _generate_onnx_mlflow_model(model_dir, inference_config):
-    import mlflow
-    import onnx
-
-    logger.info("Exporting model in MLflow format")
-    execution_mode_mappping = {0: "SEQUENTIAL", 1: "PARALLEL"}
-
-    session_dict = {}
-    if inference_config.get("session_options"):
-        session_dict = {k: v for k, v in inference_config.get("session_options").items() if v is not None}
-        if "execution_mode" in session_dict:
-            session_dict["execution_mode"] = execution_mode_mappping[session_dict["execution_mode"]]
-
-    onnx_model_path = model_dir / "model.onnx"
-    model_proto = onnx.load(onnx_model_path)
-    onnx_model_path.unlink()
-
-    # MLFlow will save models with default config save_as_external_data=True
-    # https://github.com/mlflow/mlflow/blob/1d6eaaa65dca18688d9d1efa3b8b96e25801b4e9/mlflow/onnx.py#L175
-    # There will be an aphanumeric file generated in the same folder as the model file
-    mlflow.onnx.save_model(
-        model_proto,
-        model_dir / "mlflow_model",
-        onnx_execution_providers=inference_config.get("execution_provider"),
-        onnx_session_options=session_dict,
-    )
 
 
 def _package_onnxruntime_packages(tempdir, pf_footprint: Footprint):

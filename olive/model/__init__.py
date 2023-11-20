@@ -2,12 +2,14 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
+import json
 import logging
 import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
@@ -184,6 +186,17 @@ class ModelConfig(ConfigBase):
         return REGISTRY[self.type.lower()](**self.config)
 
 
+class OutputModelFormat(str, Enum):
+    # output raw onnx model
+    RAW_ONNX = "raw_onnx"
+
+    # output mlflow model
+    MLFLOW_ONNX = "mlflow_onnx"
+
+    # output model with huggingface transformers model configs for inference
+    OPTIMUM_ONNX = "optimum_onnx"
+
+
 class ONNXModelBase(OliveModel):
     """Abstract class to manage ONNX models."""
 
@@ -318,6 +331,84 @@ class ONNXModel(ONNXModelBase):
 
     def load_model(self, rank: int = None) -> onnx.ModelProto:
         return onnx.load(self.model_path)
+
+    def save_model(
+        self,
+        output_path: str,
+        output_model_format: Union[str, OutputModelFormat] = OutputModelFormat.RAW_ONNX,
+        hf_config: Union[Dict[str, Any], HFConfig] = None,
+    ):
+        """Save the model to the given path.
+
+        If the output_path is a directory, the model is saved as model.onnx in that directory.
+        If the output_path is a file, the model is saved as is.
+        """
+        if output_model_format == OutputModelFormat.RAW_ONNX:
+            output_model_path = self.resolve_path(output_path)
+            shutil.copy(self.model_path, output_model_path)
+        elif output_model_format == OutputModelFormat.MLFLOW_ONNX:
+            self.save_model_with_mlflow(output_path)
+        elif output_model_format == OutputModelFormat.OPTIMUM_ONNX:
+            self.save_model_with_optimum(output_path, hf_config)
+
+    def save_model_with_optimum(self, output_path: str, hf_config: Union[Dict[str, Any], HFConfig] = None):
+        # prepare huggingface model configs for from_pretrained to load the model
+        output_model_path = Path(output_path)
+        output_model_name = Path(self.model_path).name
+        if output_path.endswith(".onnx"):
+            output_model_path = output_model_path.parent
+            output_model_name = output_model_path.name
+        output_model_path.mkdir(parents=True, exist_ok=True)
+        # save config.json
+        if hf_config is None:
+            logger.warning("HFConfig is not provided. Using model_attributes to generate config.json")
+            json.dump(self.model_attributes, output_model_path.open("w"))
+            # no generation config is needed, will use the default value
+        else:
+            hf_config = validate_config(hf_config, HFConfig)
+            hf_config.load_model_config().save_pretrained(output_model_path)
+            hf_config.load_model_generation_config().save_pretrained(output_model_path)
+        shutil.copy(self.model_path, output_model_path / output_model_name)
+
+    def save_model_with_mlflow(self, output_path: str):
+        try:
+            import mlflow
+        except ImportError:
+            raise ImportError("Exporting model in MLflow format requires mlflow>=2.4.0") from None
+        from packaging.version import Version
+
+        if Version(mlflow.__version__) < Version("2.4.0"):
+            logger.warning(
+                "Exporting model in MLflow format requires mlflow>=2.4.0. Skip exporting model in MLflow format."
+            )
+            return
+
+        output_model_path = Path(output_path)
+        if output_model_path.endswith(".onnx"):
+            output_model_path = output_model_path.parent
+
+        logger.info("Exporting model in MLflow format")
+        execution_mode_mapping = {0: "SEQUENTIAL", 1: "PARALLEL"}
+        inference_config = self.inference_settings or {}
+
+        session_dict = {}
+        if inference_config.get("session_options"):
+            session_dict = {k: v for k, v in inference_config.get("session_options").items() if v is not None}
+            if "execution_mode" in session_dict:
+                session_dict["execution_mode"] = execution_mode_mapping[session_dict["execution_mode"]]
+
+        model_proto = self.load_model()
+        output_model_path.unlink()
+
+        # MLFlow will save models with default config save_as_external_data=True
+        # https://github.com/mlflow/mlflow/blob/1d6eaaa65dca18688d9d1efa3b8b96e25801b4e9/mlflow/onnx.py#L175
+        # There will be an alphanumeric file generated in the same folder as the model file
+        mlflow.onnx.save_model(
+            model_proto,
+            output_model_path / "mlflow_model",
+            onnx_execution_providers=inference_config.get("execution_provider"),
+            onnx_session_options=session_dict,
+        )
 
     def prepare_session(
         self,
@@ -1150,6 +1241,16 @@ class CompositeOnnxModel(ONNXModelBase):
 
     def load_model(self, rank: int = None):
         raise NotImplementedError
+
+    def save_model(
+        self,
+        output_path: str,
+        output_model_format: Union[str, OutputModelFormat] = OutputModelFormat.RAW_ONNX,
+        hf_config: Union[Dict[str, Any], HFConfig] = None,
+    ):
+        for m in self.model_components:
+            model = ONNXModel(**m.get("config", {})) if isinstance(m, dict) else m
+            model.save_model(output_path, output_model_format, hf_config)
 
     def prepare_session(
         self,

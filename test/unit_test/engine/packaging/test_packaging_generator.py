@@ -133,7 +133,7 @@ def test_generate_zipfile_artifacts_mlflow(tmp_path):
     packaging_config = PackagingConfig()
     packaging_config.type = PackagingType.Zipfile
     packaging_config.name = "OutputModels"
-    packaging_config.export_in_mlflow_format = True
+    packaging_config.output_model_format = "mlflow"
 
     output_dir = tmp_path / "outputs"
 

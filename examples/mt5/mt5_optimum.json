@@ -1,0 +1,40 @@
+{
+    "input_model":{
+        "type": "OptimumModel",
+        "config": {
+            "model_path": "google/mt5-base",
+            "model_components": ["decoder_model.onnx", "decoder_with_past_model.onnx", "encoder_model.onnx"],
+            "hf_config": {
+                "model_class": "MT5ForConditionalGeneration"
+            }
+        }
+    },
+    "passes": {
+        "convert": {
+            "type": "OptimumConversion",
+            "config": {
+                "target_opset": 17,
+                "save_as_external_data": true,
+                "all_tensors_to_one_file": true
+            }
+        },
+        "optimize": {
+            "type": "OrtTransformersOptimization",
+            "save_as_external_data": true,
+            "all_tensors_to_one_file": true,
+            "config": {
+                "model_type": "t5",
+                "float16": true
+            }
+        }
+    },
+    "engine": {
+        "cache_dir": "cache",
+        "output_name": "mt5-base",
+        "execution_providers": ["CUDAExecutionProvider"],
+        "output_dir": "models/open_llama",
+        "packaging_config": {
+            "output_model_format": "optimum_onnx"
+        }
+    }
+}

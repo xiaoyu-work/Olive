@@ -3,8 +3,10 @@
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
 from enum import Enum
+from typing import Union
 
 from olive.common.config_utils import ConfigBase
+from olive.model import OutputModelFormat
 
 
 class PackagingType(str, Enum):
@@ -18,4 +20,4 @@ class PackagingConfig(ConfigBase):
 
     type: PackagingType = PackagingType.Zipfile  # noqa: A003
     name: str = "OutputModels"
-    export_in_mlflow_format: bool = False
+    output_model_format: Union[str, OutputModelFormat] = OutputModelFormat.RAW_ONNX
