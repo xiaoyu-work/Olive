@@ -29,7 +29,7 @@ CUDA_VISIBLE_DEVICES=1,2 python -m olive.workflows.run --config mt5_optimum.json
 ```
 
 Basically, the output model will be in `cache/models/*_OptimumMerging-*-gpu-cuda/output_model` folder if you do not want to wait Olive packaging the model into zip file.
-
+Or you can unzip the `models/mt5_optimum/OutputModels.zip` to get the output model(`CandidateModels/gpu-cuda/BestCandidateModel_1`).
 
 ## Preparation for model evaluation
 Since the MT5 model is used for text summarization that requires us to use Optimum's inference API to generate the output for optimized model. Please refer to [Optimum's inference API](https://huggingface.co/docs/optimum/v1.2.1/en/onnxruntime/modeling_ort) for more details.
