@@ -730,7 +730,7 @@ class PyTorchModel(OliveModel):
         execution_providers: Union[str, List[str]] = None,
         rank: Optional[int] = None,
     ):
-        return self.load_model().eval()
+        return self.load_model()
 
     def get_dummy_inputs(self):
         """Return a dummy input for the model."""

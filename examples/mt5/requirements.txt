@@ -1,0 +1,7 @@
+absl-py
+evalaute
+nltk
+onnxruntime-gpu
+optimum
+rouge_score
+tabulate

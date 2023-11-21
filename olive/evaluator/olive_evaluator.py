@@ -751,6 +751,7 @@ class PyTorchEvaluator(OliveEvaluator, framework=Framework.PYTORCH):
         execution_providers: Union[str, List[str]] = None,
     ) -> Tuple[OliveModelOutput, Any]:
         session = model.prepare_session(inference_settings=self.get_inference_settings(metric), device=device)
+        session.eval()
 
         preds = []
         targets = []
@@ -810,6 +811,7 @@ class PyTorchEvaluator(OliveEvaluator, framework=Framework.PYTORCH):
         # pylint: disable=expression-not-assigned
         warmup_num, repeat_test_num, _ = get_latency_config_from_metric(metric)
         session = model.prepare_session(inference_settings=self.get_inference_settings(metric), device=device)
+        session.eval()
 
         input_data, _ = next(iter(dataloader))
         device = PyTorchEvaluator._device_string_to_torch_device(device)
