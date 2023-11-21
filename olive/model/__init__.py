@@ -362,8 +362,8 @@ class ONNXModel(ONNXModelBase):
         output_model_path = Path(output_path)
         output_model_name = Path(self.model_path).name
         if output_model_path.name.endswith(".onnx"):
-            output_model_path = output_model_path.parent
             output_model_name = output_model_path.name
+            output_model_path = output_model_path.parent
         output_model_path.mkdir(parents=True, exist_ok=True)
         # save config.json
         if hf_config is None:
@@ -1259,8 +1259,8 @@ class CompositeOnnxModel(ONNXModelBase):
         assert output_path.is_dir(), f"output_path {output_path} must be a directory for composite model"
         for idx, m in enumerate(self.model_components):
             model = ONNXModel(**m.get("config", {})) if isinstance(m, dict) else m
-            output_path = Path(output_path) / f"{self.model_component_names[idx]}.onnx"
-            model.save_model(output_path, output_model_format, hf_config)
+            component_output_path = Path(output_path) / f"{self.model_component_names[idx]}.onnx"
+            model.save_model(component_output_path, output_model_format, hf_config)
 
     def prepare_session(
         self,
