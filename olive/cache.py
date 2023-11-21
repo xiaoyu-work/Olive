@@ -198,7 +198,7 @@ def save_model(
     overwrite: bool = False,
     cache_dir: Union[str, Path] = ".olive-cache",
 ):
-    """Save a model from the cache to a given path."""
+    """Save a model config from the cache to a given path."""
     # This function should probably be outside of the cache module
     # just to be safe, import lazily to avoid any future circular imports
     from olive.model import ModelConfig

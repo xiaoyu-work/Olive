@@ -23,6 +23,7 @@ import olive.data.template as data_config_template
 from olive.common.config_utils import ConfigBase, serialize_to_json, validate_config
 from olive.common.ort_inference import get_ort_inference_session
 from olive.common.user_module_loader import UserModuleLoader
+from olive.common.utils import model_proto_to_file
 from olive.constants import Framework, ModelFileFormat
 from olive.hardware import AcceleratorLookup, Device
 from olive.model.hf_utils import HFConfig, get_hf_model_dummy_input, huggingface_model_loader
@@ -337,21 +338,26 @@ class ONNXModel(ONNXModelBase):
         output_path: str,
         output_model_format: Union[str, OutputModelFormat] = OutputModelFormat.RAW_ONNX,
         hf_config: Union[Dict[str, Any], HFConfig] = None,
+        external_data_config: dict = None,
     ):
         """Save the model to the given path.
 
         If the output_path is a directory, the model is saved as model.onnx in that directory.
         If the output_path is a file, the model is saved as is.
         """
+        external_data_config = external_data_config or {}
         if output_model_format == OutputModelFormat.RAW_ONNX:
             output_model_path = self.resolve_path(output_path)
-            shutil.copy(self.model_path, output_model_path)
+            model_proto_to_file(self.load_model(), output_model_path, **external_data_config)
         elif output_model_format == OutputModelFormat.MLFLOW_ONNX:
-            self.save_model_with_mlflow(output_path)
+            self._save_model_with_mlflow(output_path)
         elif output_model_format == OutputModelFormat.OPTIMUM_ONNX:
-            self.save_model_with_optimum(output_path, hf_config)
+            self._save_model_with_optimum(output_path, hf_config, external_data_config)
 
-    def save_model_with_optimum(self, output_path: str, hf_config: Union[Dict[str, Any], HFConfig] = None):
+    def _save_model_with_optimum(
+        self, output_path: str, hf_config: Union[Dict[str, Any], HFConfig] = None, external_data_config: dict = None
+    ):
+        external_data_config = external_data_config or {}
         # prepare huggingface model configs for from_pretrained to load the model
         output_model_path = Path(output_path)
         output_model_name = Path(self.model_path).name
@@ -369,9 +375,9 @@ class ONNXModel(ONNXModelBase):
             hf_config = validate_config(hf_config, HFConfig)
             hf_config.load_model_config().save_pretrained(output_model_path)
             hf_config.load_model_generation_config().save_pretrained(output_model_path)
-        shutil.copy(self.model_path, output_model_path / output_model_name)
+        model_proto_to_file(self.load_model(), output_model_path / output_model_name, **external_data_config)
 
-    def save_model_with_mlflow(self, output_path: str):
+    def _save_model_with_mlflow(self, output_path: str):
         try:
             import mlflow
         except ImportError:
@@ -1249,8 +1255,11 @@ class CompositeOnnxModel(ONNXModelBase):
         output_model_format: Union[str, OutputModelFormat] = OutputModelFormat.RAW_ONNX,
         hf_config: Union[Dict[str, Any], HFConfig] = None,
     ):
-        for m in self.model_components:
+        output_path = Path(output_path)
+        assert output_path.is_dir(), f"output_path {output_path} must be a directory for composite model"
+        for idx, m in enumerate(self.model_components):
             model = ONNXModel(**m.get("config", {})) if isinstance(m, dict) else m
+            output_path = Path(output_path) / f"{self.model_component_names[idx]}.onnx"
             model.save_model(output_path, output_model_format, hf_config)
 
     def prepare_session(

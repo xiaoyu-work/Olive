@@ -2,6 +2,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Union
@@ -14,6 +15,8 @@ from olive.model import CompositeOnnxModel, ONNXModel
 from olive.passes import Pass
 from olive.passes.onnx.common import get_external_data_config, model_proto_to_olive_model
 from olive.passes.pass_config import PassConfigParam
+
+logger = logging.getLogger(__name__)
 
 
 class OptimumMerging(Pass):
@@ -39,6 +42,22 @@ class OptimumMerging(Pass):
                     " added to match the number of outputs."
                 ),
             ),
+            "decoder": PassConfigParam(
+                type_=str,
+                default_value="decoder_model.onnx",
+                description=(
+                    "The component name or model path of the decoder model to merge with the"
+                    " decoder_with_past model."
+                ),
+            ),
+            "decoder_with_past": PassConfigParam(
+                type_=str,
+                default_value="decoder_with_past_model.onnx",
+                description=(
+                    "The component name or model path of the decoder_with_past model to merge"
+                    " with the decoder model."
+                ),
+            ),
         }
 
         config.update(get_external_data_config())
@@ -47,8 +66,6 @@ class OptimumMerging(Pass):
     def _run_for_config(
         self, model: CompositeOnnxModel, data_root: str, config: Dict[str, Any], output_model_path: str
     ) -> Union[ONNXModel, CompositeOnnxModel]:
-        assert len(model.model_components) == 2
-
         # TODO(trajep): Remove this when the bug in Optimum is fixed. Optimum calls ByteSize() to see whether
         # it should be using the merged model directly or use the path instead in the model checker,
         # but unfortunately ByteSize() doesn't seem to be working correctly with external weights.
@@ -62,9 +79,26 @@ class OptimumMerging(Pass):
 
             from optimum.onnx import merge_decoders
 
+            # if cannot find the component name from input model, use the value provided in config
+            decoder_model_path = None
+            decoder_model_with_past_path = None
+            model_idx_to_be_merged = []
+            for idx, component_name in enumerate(model.model_component_names):
+                if f"{component_name}.onnx" == config["decoder"]:
+                    decoder_model_path = model.model_components[idx].model_path
+                    model_idx_to_be_merged.append(idx)
+                elif f"{component_name}.onnx" == config["decoder_with_past"]:
+                    decoder_model_with_past_path = model.model_components[idx].model_path
+                    model_idx_to_be_merged.append(idx)
+
+            assert decoder_model_path is not None and decoder_model_with_past_path is not None, (
+                f"Cannot find the component name {config['decoder']} or {config['decoder_with_past']}"
+                f" from the input model."
+            )
+
             merged_model = merge_decoders(
-                model.model_components[0].model_path,
-                model.model_components[1].model_path,
+                decoder=decoder_model_path,
+                decoder_with_past=decoder_model_with_past_path,
                 strict=config["strict"],
             )
         finally:
@@ -83,5 +117,29 @@ class OptimumMerging(Pass):
 
         execution_provider = self.accelerator_spec.execution_provider
         onnxruntime.InferenceSession(output_model_path, sess_options, providers=[execution_provider])
+
+        if len(model.model_components) > 2:
+            logger.debug(
+                "The input model has more than 2 components. Removing the decoder and decoder_with_past components."
+            )
+            onnx_model_components = []
+            for idx, component in enumerate(model.model_components):
+                if idx not in model_idx_to_be_merged:
+                    new_component_path = str(
+                        Path(output_model_path).parent / f"{model.model_component_names[idx]}.onnx"
+                    )
+                    config_keys = [
+                        "save_as_external_data",
+                        "all_tensors_to_one_file",
+                        "external_data_name",
+                        "size_threshold",
+                        "convert_attribute",
+                    ]
+                    external_data_configs = {key: config[key] for key in config_keys if key in config}
+                    component.save_model(new_component_path, external_data_config=external_data_configs)
+                    onnx_model_components.append(ONNXModel(new_component_path, model_attributes=model.model_attributes))
+            onnx_model_components.append(olive_model)
+            model_component_names = [Path(model_component.model_path).stem for model_component in onnx_model_components]
+            return CompositeOnnxModel(onnx_model_components, model_component_names)
 
         return olive_model
