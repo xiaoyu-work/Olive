@@ -1,4 +1,4 @@
-# Llama2 optimization
+# MT5 optimization
 This folder contains sample use cases of Olive to optimize a [MT5](https://huggingface.co/google/mt5-base)
 
 ## Optimization Workflows
