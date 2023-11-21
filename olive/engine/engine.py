@@ -359,8 +359,6 @@ class Engine:
             self.dump_run_history(run_history, output_dir / f"run_history_{accelerator_spec}.txt")
 
         if packaging_config and self.passes:
-            # TODO(trajep): should we support package input model?
-            # TODO(trajep): do you support packaging pytorch models?
             logger.info(f"Package top ranked {sum(len(f.nodes) for f in outputs.values())} models as artifacts")
             generate_output_artifacts(
                 packaging_config,

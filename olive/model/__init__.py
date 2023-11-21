@@ -355,14 +355,15 @@ class ONNXModel(ONNXModelBase):
         # prepare huggingface model configs for from_pretrained to load the model
         output_model_path = Path(output_path)
         output_model_name = Path(self.model_path).name
-        if output_path.endswith(".onnx"):
+        if output_model_path.name.endswith(".onnx"):
             output_model_path = output_model_path.parent
             output_model_name = output_model_path.name
         output_model_path.mkdir(parents=True, exist_ok=True)
         # save config.json
         if hf_config is None:
             logger.warning("HFConfig is not provided. Using model_attributes to generate config.json")
-            json.dump(self.model_attributes, output_model_path.open("w"))
+            config_path = output_model_path / "config.json"
+            json.dump(self.model_attributes, config_path.open("w"))
             # no generation config is needed, will use the default value
         else:
             hf_config = validate_config(hf_config, HFConfig)

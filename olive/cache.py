@@ -217,7 +217,7 @@ def save_model(
 
     if model_json["type"].lower() == "compositeonnxmodel":
         logger.warning(f"Saving models of type '{model_json['type']}' is not supported yet.")
-        return None
+        return model_json
 
     # create model object so that we can get the resource paths
     model_config: ModelConfig = ModelConfig.from_json(model_json)

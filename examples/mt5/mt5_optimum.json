@@ -32,7 +32,7 @@
         "cache_dir": "cache",
         "output_name": "mt5-base",
         "execution_providers": ["CUDAExecutionProvider"],
-        "output_dir": "models/open_llama",
+        "output_dir": "models/mt5_optimum",
         "packaging_config": {
             "output_model_format": "optimum_onnx"
         }
