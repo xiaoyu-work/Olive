@@ -34,10 +34,6 @@ def optimize(optimized_model_dir: Path, model_type: str):
             # ORT-DML doesn't support SimplifiedLayerNorm or SkipSimplifiedLayerNorm yet, so only enable the fusions if
             # LayerNorm is selected
             if submodel_name == "llama_v2":
-                if config.normalization_type == "layer_norm":
-                    olive_config["passes"]["optimize"]["config"]["optimization_options"]["enable_layer_norm"] = True
-                    del olive_config["passes"]["optimize"]["config"]["force_fp32_nodes"]
-
                 # Fewer than 32 layers can be provided for debugging purposes so we have to remove them from the config
                 if config.num_layers < 32:
                     model_components = olive_config["input_model"]["config"]["model_components"]
@@ -171,13 +167,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Expose the web UI on the local network (does nothing if --interactive is not supplied)",
     )
-    parser.add_argument(
-        "--normalization_type",
-        default="rms",
-        choices=["layer_norm", "rms"],
-        help="Whether to use LayerNorm for the normalization layers or RMS.",
-        type=str,
-    )
     parser.add_argument("--prompt", default="What is the lightest element?", type=str)
     parser.add_argument("--max_seq_len", default=2048, type=int, help="The size of the cache")
     parser.add_argument("--device_id", default=0, type=int, help="GPU device to use during inference")
@@ -203,7 +192,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config.model_type = args.model_type
-    config.normalization_type = args.normalization_type
     config.num_layers = args.num_layers
 
     script_dir = Path(__file__).resolve().parent
