@@ -39,13 +39,13 @@ def test_ort_perf_tuning_pass(config, tmp_path):
         {"providers_list": ["CPUExecutionProvider", "CUDAExecutionProvider"], "device": "gpu"},
     ],
 )
-def test_ort_perf_tuning_with_customized_configs(mock_run, config):
+def test_ort_perf_tuning_with_customized_configs(mock_run, config, tmpdir):
     # setup
     input_model = get_onnx_model()
     p = create_pass_from_dict(OrtPerfTuning, config, disable_search=True)
 
     # execute
-    p.run(input_model, None, None)
+    p.run(input_model, None, tmpdir)
 
     # assert
     if "providers_list" not in config:
