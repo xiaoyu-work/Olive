@@ -369,7 +369,10 @@ class Pass(ABC):
                 component_names.append(model.get_model_component_name(cidx))
             output_model = CompositeOnnxModel(components, component_names)
         else:
-            output_model_path = ONNXModel.resolve_path(output_model_path, Path(model.model_path).name)
+            if model.model_path and Path(model.model_path).parent.is_dir():
+                output_model_path = ONNXModel.resolve_path(output_model_path, Path(model.model_path).name)
+            else:
+                output_model_path = ONNXModel.resolve_path(output_model_path)
             output_model = self._run_for_config(model, data_root, config, output_model_path)
         # assumption: the model attributes from passes, if any, are more important than
         # the input model attributes, we should not update/extend anymore outside of the pass run
