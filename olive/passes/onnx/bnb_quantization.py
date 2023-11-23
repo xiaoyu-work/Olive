@@ -55,8 +55,6 @@ class OnnxBnb4Quantization(Pass):
 
         from onnxruntime.quantization.matmul_bnb4_quantizer import MatMulBnb4Quantizer
 
-        output_model_path = ONNXModel.resolve_path(output_model_path)
-
         quant_type = config["quant_type"]
         quantized_modules = config["quantized_modules"]
         if model.model_attributes:

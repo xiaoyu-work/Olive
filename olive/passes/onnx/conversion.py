@@ -344,8 +344,6 @@ class OnnxConversion(Pass):
             pytorch_model, dummy_inputs, io_config, config, device, torch_dtype
         )
 
-        # save the model to the output path and return the model
-        output_model_path = ONNXModel.resolve_path(output_model_path)
         output_model = model_proto_to_olive_model(converted_onnx_model, output_model_path, config)
         output_model.model_attributes = model_attributes
         return output_model

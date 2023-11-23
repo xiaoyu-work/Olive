@@ -93,7 +93,6 @@ class OrtMixedPrecision(Pass):
         fp16_model = self._convert_float_to_float16(
             model=model.load_model(), use_symbolic_shape_infer=True, **parameters
         )
-        output_model_path = ONNXModel.resolve_path(output_model_path)
         config = self._config_class(**config)
         return model_proto_to_olive_model(fp16_model, output_model_path, config.dict())
 

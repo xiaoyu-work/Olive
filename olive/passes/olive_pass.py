@@ -14,7 +14,7 @@ from olive.common.config_utils import ConfigBase, ParamCategory, validate_config
 from olive.common.user_module_loader import UserModuleLoader
 from olive.data.config import DataConfig
 from olive.hardware import DEFAULT_CPU_ACCELERATOR, AcceleratorSpec
-from olive.model import CompositeOnnxModel, DistributedOnnxModel, OliveModel
+from olive.model import CompositeOnnxModel, DistributedOnnxModel, OliveModel, ONNXModel
 from olive.passes.pass_config import (
     PassConfigBase,
     PassConfigParam,
@@ -359,7 +359,8 @@ class Pass(ABC):
             components = []
             component_names = []
             for cidx, child in enumerate(model.get_model_components()):
-                component_output_path = Path(output_model_path).with_suffix("") / str(cidx)
+                component_output_path = Path(output_model_path).with_suffix("")
+                component_output_path = ONNXModel.resolve_path(component_output_path, Path(child.model_path).name)
                 output_model_component = self._run_for_config(child, data_root, config, str(component_output_path))
                 output_model_component.model_attributes = (
                     output_model_component.model_attributes or child.model_attributes
@@ -368,6 +369,7 @@ class Pass(ABC):
                 component_names.append(model.get_model_component_name(cidx))
             output_model = CompositeOnnxModel(components, component_names)
         else:
+            output_model_path = ONNXModel.resolve_path(output_model_path, Path(model.model_path).name)
             output_model = self._run_for_config(model, data_root, config, output_model_path)
         # assumption: the model attributes from passes, if any, are more important than
         # the input model attributes, we should not update/extend anymore outside of the pass run

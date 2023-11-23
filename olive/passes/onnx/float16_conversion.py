@@ -50,8 +50,6 @@ class OnnxFloatToFloat16(Pass):
     ) -> ONNXModel:
         from onnxconverter_common import float16
 
-        output_model_path = ONNXModel.resolve_path(output_model_path)
-
         config = self._config_class(**config)
 
         model_fp32 = onnx.load(str(model.model_path))
