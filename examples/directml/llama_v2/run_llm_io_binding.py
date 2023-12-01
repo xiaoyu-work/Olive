@@ -1,13 +1,14 @@
-# This program will run the ONNX version of the LlamaV2 model.
+# This program will run the ONNX version of the LlamaV2 and Falcon models.
 import argparse
 import os
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import onnxruntime
 from sentencepiece import SentencePieceProcessor
+from transformers import AutoTokenizer
 
 
 class Tokenizer:
@@ -37,16 +38,20 @@ class Tokenizer:
         return self.sp_model.decode(t)
 
 
-def run_llama_v2_io_binding(
+def run_llm_io_binding(
     prompt: str,
     max_seq_len: int = 2048,
     max_gen_len: int = 256,
     device_id: int = 0,
     disable_metacommands: bool = False,
     ignore_eos: bool = False,
-    model_dir: str = "models/optimized/llama_v2",
+    model_name: str = "llama_v2",
+    model_dir: Optional[str] = None,
 ) -> str:
     onnxruntime.set_default_logger_severity(3)
+
+    if model_dir is None:
+        model_dir = f"models/optimized/{model_name}"
 
     # Create the ONNX session
     providers = [
@@ -72,26 +77,36 @@ def run_llama_v2_io_binding(
     llm_session_options.add_free_dimension_override_by_name("max_seq_len", max_seq_len)
     llm_session_options.add_free_dimension_override_by_name("seq_len_increment", 1)
     llm_session = onnxruntime.InferenceSession(
-        os.path.join(model_dir, "llama_v2/decoder_model_merged.onnx"),
+        os.path.join(model_dir, f"{model_name}/decoder_model_merged.onnx"),
         sess_options=llm_session_options,
         providers=providers,
     )
 
     data_type = np.float16
 
-    hidden_size = 4096
-    n_heads = 32
     n_layers = 0
-
+    cache_shape = ()
     for inputs_meta in llm_session._inputs_meta:
         if inputs_meta.name.startswith("cache.") and inputs_meta.name.endswith(".key"):
+            cache_shape = inputs_meta.shape
             n_layers += 1
 
     binding_device = "dml"
 
     # Initialize the tokenizer and produce the initial tokens.
-    tokenizer = Tokenizer(model_path=os.path.join(model_dir, "tokenizer.model"))
-    tokens = tokenizer.encode(prompt, bos=True, eos=False)
+    if model_name == "llama_v2":
+        tokenizer = Tokenizer(model_path=os.path.join(model_dir, "tokenizer.model"))
+        tokens = tokenizer.encode(prompt, bos=True, eos=False)
+        vocab_size = tokenizer.n_words
+        eos_id = tokenizer.eos_id
+    elif model_name == "falcon":
+        tokenizer = AutoTokenizer.from_pretrained("tiiuae/falcon-7b-instruct")
+        tokens = tokenizer.encode(prompt)
+        vocab_size = tokenizer.vocab_size
+        eos_id = tokenizer.eos_token_id
+    else:
+        raise ValueError(f"Unsupported model '{model_name}'")
+
     tokens = np.expand_dims(np.asarray(tokens, dtype=np.int64), 0)
     tokens = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, binding_device)
     tokens_increment = onnxruntime.OrtValue.ortvalue_from_shape_and_type((1, 1), np.int64, binding_device)
@@ -104,20 +119,16 @@ def run_llama_v2_io_binding(
     attn_mask = onnxruntime.OrtValue.ortvalue_from_numpy(attn_mask, binding_device)
     attn_mask_out = onnxruntime.OrtValue.ortvalue_from_shape_and_type((1, max_seq_len), np.int32, binding_device)
 
-    # Create the K and V caches.
-    head_dim = int(hidden_size / n_heads)
-
     # Create the argmax sampling's I/O binding
     argmax_sampling_io_binding = argmax_sampling_session.io_binding()
     argmax_sampling_io_binding.bind_ortvalue_output("next_token", tokens_increment)
 
     # Create the LLM model's I/O binding
-    logits_shape = (1, tokenizer.n_words)
+    logits_shape = (1, vocab_size)
     logits = onnxruntime.OrtValue.ortvalue_from_shape_and_type(logits_shape, data_type, binding_device)
     llm_io_binding = llm_session.io_binding()
     llm_io_binding.bind_ortvalue_output("logits", logits)
 
-    cache_shape = (1, n_heads, max_seq_len, head_dim)
     initial_cache = np.zeros(cache_shape, dtype=data_type)
     k_caches = []
     v_caches = []
@@ -170,7 +181,7 @@ def run_llama_v2_io_binding(
         output_tokens.append(tokens_increment.numpy().item())
 
         # Stop if/when we get an ENDOFTEXT token before reaching maximum sequence length
-        if not ignore_eos and output_tokens[-1] == tokenizer.eos_id:
+        if not ignore_eos and output_tokens[-1] == eos_id:
             break
 
         if idx == 0:
@@ -200,20 +211,22 @@ if __name__ == "__main__":
     parser.add_argument("--disable_metacommands", action="store_true")
     parser.add_argument("--ignore_eos", action="store_true")
     parser.add_argument("--device_id", type=int, default=0)
+    parser.add_argument("--model_name", type=str, choices=["llama_v2", "falcon"], default="llama_v2")
     parser.add_argument(
         "--model_dir",
         type=str,
-        default="models/optimized/llama_v2",
         help="Path to the folder containing the argmax_sampling folder, llama_v2 folder and the tokenizer.model file",
     )
 
     args = parser.parse_args()
-    run_llama_v2_io_binding(
+
+    run_llm_io_binding(
         args.prompt,
         args.max_seq_len,
         args.max_gen_len,
         args.device_id,
         args.disable_metacommands,
         args.ignore_eos,
+        args.model_name,
         args.model_dir,
     )

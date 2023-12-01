@@ -9,3 +9,4 @@ Pygments
 sentencepiece
 tabulate
 torch
+transformers

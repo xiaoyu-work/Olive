@@ -483,6 +483,8 @@
                 "float16": true,
                 "use_gpu": true,
                 "keep_io_types": false,
+                "use_gqa": false,
+                "num_key_value_heads": 1,
                 "optimization_options": {
                     "enable_gelu": false,
                     "enable_layer_norm": false,

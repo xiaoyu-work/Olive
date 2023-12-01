@@ -3,6 +3,8 @@
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
 
+from typing import Union
+
 import numpy as np
 import torch
 
@@ -15,15 +17,15 @@ class DecoderModel(torch.nn.Module):
         hidden_size: int,
         n_heads: int,
         scale_type: str,
-        normalization_type: str,
+        model_name: str,
     ) -> None:
         super().__init__()
         self.tok_embeddings = torch.nn.Embedding(vocab_size, hidden_size)
 
         self.norm = {
-            "layer_norm": LayerNorm(hidden_size, eps=1e-5),
-            "rms": RMSNorm(hidden_size, eps=1e-5),
-        }[normalization_type]
+            "llama_v2": RMSNorm(hidden_size, eps=1e-5),
+            "falcon": LayerNorm(hidden_size, eps=1e-5),
+        }[model_name]
 
         self.layers = torch.nn.ModuleList()
         for _ in range(n_layers):
@@ -31,7 +33,7 @@ class DecoderModel(torch.nn.Module):
                 hidden_size,
                 n_heads,
                 scale_type,
-                normalization_type,
+                model_name,
             )
             self.layers.append(layer)
 
@@ -125,7 +127,7 @@ class LayerNorm(torch.nn.Module):
         super().__init__()
         self.eps = eps
         self.weight = torch.nn.Parameter(torch.ones(dim))
-        self.bias = torch.zeros(dim)
+        self.bias = torch.nn.Parameter(torch.ones(dim))
 
     def forward(self, hidden_states):
         diff = hidden_states - hidden_states.mean(-1, keepdim=True)
@@ -140,30 +142,34 @@ class TransformerLayer(torch.nn.Module):
         hidden_size: int,
         n_heads: int,
         scale_type: str,
-        normalization_type: str,
+        model_name: str,
     ) -> None:
         super().__init__()
         self.attention_norm = {
-            "layer_norm": LayerNorm(hidden_size, eps=1e-6),
-            "rms": RMSNorm(hidden_size, eps=1e-6),
-        }[normalization_type]
+            "llama_v2": RMSNorm(hidden_size, eps=1e-6),
+            "falcon": LayerNorm(hidden_size, eps=1e-6),
+        }[model_name]
 
         self.ffn_norm = {
-            "layer_norm": LayerNorm(hidden_size, eps=1e-6),
-            "rms": RMSNorm(hidden_size, eps=1e-6),
-        }[normalization_type]
+            "llama_v2": RMSNorm(hidden_size, eps=1e-6),
+            "falcon": LayerNorm(hidden_size, eps=1e-6),
+        }[model_name]
 
         self.cos, self.sin = rotary_mat(hidden_size, n_heads, 4096, head_scale=1.0)
 
-        self.attention = SelfAttention(
-            hidden_size,
-            n_heads,
-            scale_type,
-        )
+        self.attention = {
+            "llama_v2": SelfAttention(hidden_size, n_heads, scale_type),
+            "falcon": SelfMultiQueryAttention(hidden_size, n_heads, scale_type),
+        }[model_name]
+
         proj_dim = hidden_size * 4
         proj_dim = int(2 * proj_dim / 3)
         proj_dim = 256 * ((proj_dim + 256 - 1) // 256)
-        self.feed_forward = ProjLayerSiluMatMul(hidden_size, proj_dim)
+
+        self.feed_forward = {
+            "llama_v2": ProjLayerSiluMatMul(hidden_size, proj_dim),
+            "falcon": ProjLayerFalcon(hidden_size),
+        }[model_name]
 
     def forward(
         self,
@@ -321,6 +327,87 @@ class SelfAttention(torch.nn.Module):
         return self.wo(attn), k_cache, v_cache
 
 
+class SelfMultiQueryAttention(torch.nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        n_heads: int,
+        scale_type: str,
+    ) -> None:
+        super().__init__()
+
+        self.hidden_size = hidden_size
+        self.n_heads = n_heads
+        self.head_dim = int(hidden_size / n_heads)
+
+        self.wq = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+        self.wk = torch.nn.Linear(hidden_size, self.head_dim, bias=False)
+        self.wv = torch.nn.Linear(hidden_size, self.head_dim, bias=False)
+        self.wo = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+        self.apply_mask = ApplyMask()
+        self.rotary_embedding = RotaryEmbedding()
+
+        if scale_type == "HeadDim":
+            self.scale = self.head_dim
+        elif scale_type == "SquareRootHeadDim":
+            self.scale = np.sqrt(self.head_dim)
+        else:
+            raise ValueError(f"Unknown scale type {scale_type}")
+
+    def forward(
+        self,
+        use_cache: bool,
+        x: torch.Tensor,
+        position_ids: torch.Tensor,
+        attn_mask: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        query = self.wq(x)
+        key = self.wk(x)
+        value = self.wv(x)
+
+        batch_size = x.shape[0]
+        seq_len = x.shape[1]
+
+        # Split the attention heads
+        query = torch.reshape(query, [batch_size, seq_len, self.n_heads, self.head_dim]).transpose(1, 2)
+        key = torch.reshape(key, [batch_size, seq_len, 1, self.head_dim]).transpose(1, 2)
+        value = torch.reshape(value, [batch_size, seq_len, 1, self.head_dim]).transpose(1, 2)
+
+        # Apply rotary positional embedding
+        query = self.rotary_embedding(query, cos, sin, position_ids)
+        key = self.rotary_embedding(key, cos, sin, position_ids)
+
+        # Append new entries to the end of k, v cache
+        k_cache = k_cache[:, :, seq_len:, :]
+        v_cache = v_cache[:, :, seq_len:, :]
+        k_cache = torch.cat((k_cache, key), dim=2)
+        v_cache = torch.cat((v_cache, value), dim=2)
+
+        key = k_cache
+        value = v_cache
+
+        key = key.permute([0, 1, 3, 2])
+
+        # Calculate attention scores
+        score = torch.matmul(query, key) / self.scale
+
+        # Apply the mask
+        score = self.apply_mask(use_cache, score, attn_mask, seq_len, self.n_heads)
+
+        # Calculate attention values
+        prob = torch.nn.functional.softmax(score, dim=-1)
+        attn = torch.matmul(prob, value)
+
+        # Merge attention heads
+        attn = attn.permute([0, 2, 1, 3]).reshape([batch_size, seq_len, self.hidden_size])
+
+        return self.wo(attn), k_cache, v_cache
+
+
 class ProjLayerSiluMatMul(torch.nn.Module):
     def __init__(
         self,
@@ -339,3 +426,20 @@ class ProjLayerSiluMatMul(torch.nn.Module):
         w1x = self.w1(x)
 
         return self.w2(w1x * torch.sigmoid(w1x) * self.w3(x))
+
+
+class ProjLayerFalcon(torch.nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        device: Union[torch.device, None] = None,
+    ) -> None:
+        super().__init__()
+
+        self.to_4h = torch.nn.Linear(hidden_size, 4 * hidden_size, bias=False, device=device)
+        self.act = torch.nn.GELU()
+        self.to_h = torch.nn.Linear(4 * hidden_size, hidden_size, bias=False, device=device)
+
+    def forward(self, x):
+        x = self.act(self.to_4h(x))
+        return self.to_h(x)

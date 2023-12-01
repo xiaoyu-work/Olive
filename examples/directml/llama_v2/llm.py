@@ -7,34 +7,55 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import urllib.request
 import warnings
 from pathlib import Path
 
 import config
+import torch
+import transformers
 from chat_app.app import launch_chat_app
-from run_llama_v2_io_binding import run_llama_v2_io_binding
+from run_llm_io_binding import run_llm_io_binding
+from transformers import AutoTokenizer
 
 from olive.model import ONNXModel
 from olive.workflows import run as olive_run
 
 
-def optimize(optimized_model_dir: Path, model_type: str):
+def optimize(optimized_model_dir: Path, model_name: str, model_type: str):
     script_dir = Path(__file__).resolve().parent
     model_info = {}
-    submodel_names = ["argmax_sampling", "llama_v2"]
+    submodel_names = ["argmax_sampling", model_name]
 
     for submodel_name in submodel_names:
         print(f"\nOptimizing {submodel_name}")
 
         olive_config = None
-        with Path.open(script_dir / f"config_{submodel_name}.json") as fin:
+        config_file_name = "config_llm.json" if submodel_name == model_name else f"config_{submodel_name}.json"
+
+        with Path.open(script_dir / config_file_name) as fin:
             olive_config = json.load(fin)
 
             # ORT-DML doesn't support SimplifiedLayerNorm or SkipSimplifiedLayerNorm yet, so only enable the fusions if
             # LayerNorm is selected
-            if submodel_name == "llama_v2":
-                if config.normalization_type == "layer_norm":
+            if submodel_name == model_name:
+                olive_config["input_model"]["config"]["model_path"] = model_name
+                olive_config["engine"]["output_name"] = model_name
+
+                olive_config["passes"]["optimize"]["config"]["num_heads"] = config.num_heads
+                olive_config["passes"]["optimize"]["config"]["hidden_size"] = config.hidden_size
+
+                if config.model_name == "falcon":
+                    # TODO (pavignol): Enable attention and rotary embedding once GQA is working
+                    olive_config["passes"]["optimize"]["config"]["optimization_options"]["enable_attention"] = False
+                    olive_config["passes"]["optimize"]["config"]["optimization_options"][
+                        "use_multi_head_attention"
+                    ] = False
+                    olive_config["passes"]["optimize"]["config"]["optimization_options"][
+                        "enable_rotary_embeddings"
+                    ] = False
+
                     olive_config["passes"]["optimize"]["config"]["optimization_options"]["enable_layer_norm"] = True
                     del olive_config["passes"]["optimize"]["config"]["force_fp32_nodes"]
 
@@ -86,7 +107,7 @@ def optimize(optimized_model_dir: Path, model_type: str):
 
             assert conversion_footprint is not None
 
-            if submodel_name == "llama_v2":
+            if submodel_name == model_name:
                 assert optimizer_footprint is not None
                 assert merging_footprint is not None
                 optimized_olive_model = ONNXModel(**merging_footprint["model_config"]["config"])
@@ -113,7 +134,7 @@ def optimize(optimized_model_dir: Path, model_type: str):
             dst_weights_path = dst_path.with_suffix(".onnx.data")
             shutil.copyfile(src_weights_path, dst_weights_path)
 
-    raw_data_folder = Path(__file__).resolve().parent / "raw_model_data" / model_type
+    raw_data_folder = Path(__file__).resolve().parent / "raw_model_data" / model_name / model_type
     raw_data_folder.mkdir(exist_ok=True, parents=True)
     src_tokenizer_path = raw_data_folder / "tokenizer.model"
     dst_tokenizer_path = optimized_model_dir / "tokenizer.model"
@@ -122,16 +143,14 @@ def optimize(optimized_model_dir: Path, model_type: str):
     print(f"The optimized pipeline is located here: {optimized_model_dir}")
 
 
-def download_checkpoint(model_type: str):
-    model_name = f"llama-2-{model_type}"
-
-    raw_data_folder = Path(__file__).resolve().parent / "raw_model_data" / model_type
+def download_llama_v2_checkpoint(model_type: str):
+    raw_data_folder = Path(__file__).resolve().parent / "raw_model_data" / "llama_v2" / model_type
     raw_data_folder.mkdir(exist_ok=True, parents=True)
 
     license_path = raw_data_folder / "LICENSE"
     use_policy_path = raw_data_folder / "USE_POLICY.md"
     tokenizer_path = raw_data_folder / "tokenizer.model"
-    weights_path = raw_data_folder / f"{model_name}.pth"
+    weights_path = raw_data_folder / "weights.pth"
 
     opener = urllib.request.build_opener()
     opener.addheaders = [("User-agent", "wget")]
@@ -158,8 +177,26 @@ def download_checkpoint(model_type: str):
         urllib.request.urlretrieve(email_url.replace("*", "tokenizer.model"), tokenizer_path)
 
     if not weights_path.is_file():
-        print(f"Downloading {model_name}")
-        urllib.request.urlretrieve(email_url.replace("*", f"{model_name}/consolidated.00.pth"), weights_path)
+        print(f"Downloading llama-2-{model_type}")
+        urllib.request.urlretrieve(email_url.replace("*", f"llama-2-{model_type}/consolidated.00.pth"), weights_path)
+
+
+def download_falcon_checkpoint(model_type: str):
+    raw_data_folder = Path(__file__).resolve().parent / "raw_model_data" / "falcon" / model_type
+    raw_data_folder.mkdir(exist_ok=True, parents=True)
+
+    weights_path = raw_data_folder / "weights.pth"
+
+    if not weights_path.is_file():
+        model_suffix = model_type.replace("chat", "instruct")
+        model = f"tiiuae/falcon-{model_suffix}"
+        tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+
+        pipeline = transformers.pipeline(
+            "text-generation", model=model, tokenizer=tokenizer, torch_dtype=torch.float32, device="cpu"
+        )
+
+        torch.save(pipeline.model.state_dict(), weights_path)
 
 
 if __name__ == "__main__":
@@ -171,18 +208,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Expose the web UI on the local network (does nothing if --interactive is not supplied)",
     )
-    parser.add_argument(
-        "--normalization_type",
-        default="rms",
-        choices=["layer_norm", "rms"],
-        help="Whether to use LayerNorm for the normalization layers or RMS.",
-        type=str,
-    )
     parser.add_argument("--prompt", default="What is the lightest element?", type=str)
     parser.add_argument("--max_seq_len", default=2048, type=int, help="The size of the cache")
     parser.add_argument("--device_id", default=0, type=int, help="GPU device to use during inference")
     parser.add_argument(
         "--max_gen_len", default=256, type=int, help="The maximum number of tokens that can be included in an answer"
+    )
+    parser.add_argument(
+        "--model_name",
+        default="llama_v2",
+        choices=["llama_v2", "falcon"],
+        type=str,
     )
     parser.add_argument(
         "--model_type",
@@ -202,16 +238,33 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    config.model_name = args.model_name
     config.model_type = args.model_type
-    config.normalization_type = args.normalization_type
     config.num_layers = args.num_layers
 
+    config.hidden_size = {
+        "llama_v2": 4096,
+        "falcon": 4544,
+    }[args.model_name]
+
+    config.num_heads = {
+        "llama_v2": 32,
+        "falcon": 71,
+    }[args.model_name]
+
     script_dir = Path(__file__).resolve().parent
-    optimized_model_dir = script_dir / "models" / "optimized" / "llama_v2"
+    optimized_model_dir = script_dir / "models" / "optimized" / args.model_name
 
     if args.optimize or not optimized_model_dir.exists():
-        download_checkpoint(args.model_type)
-        optimize(optimized_model_dir, args.model_type)
+        if args.model_name == "llama_v2":
+            download_llama_v2_checkpoint(args.model_type)
+        elif args.model_name == "falcon":
+            download_falcon_checkpoint(args.model_type)
+        else:
+            print(f"Model '{args.model_name}' is not supported yet")
+            sys.exit(1)
+
+        optimize(optimized_model_dir, args.model_name, args.model_type)
 
     if not args.optimize:
         if args.interactive:
@@ -219,4 +272,10 @@ if __name__ == "__main__":
         else:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                run_llama_v2_io_binding(args.prompt, args.max_seq_len, args.max_gen_len, args.device_id)
+                run_llm_io_binding(
+                    args.prompt,
+                    args.max_seq_len,
+                    args.max_gen_len,
+                    args.device_id,
+                    model_name=args.model_name,
+                )

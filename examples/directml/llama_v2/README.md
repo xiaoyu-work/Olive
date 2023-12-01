@@ -34,10 +34,10 @@ pip install -r requirements.txt
 
 # Conversion to ONNX and Latency Optimization
 
-The easiest way to optimize the pipeline is with the `llama_v2.py` helper script:
+The easiest way to optimize the pipeline is with the `llm.py` helper script:
 
 ```
-python llama_v2.py
+python llm.py --model_name="llama_v2"
 ```
 
 The first time this script is invoked can take some time since it will need to download the Llama 2 weights from Meta. When requested, paste the URL that was sent to your e-mail address by Meta (the link is valid for 24 hours).
