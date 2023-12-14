@@ -68,6 +68,11 @@ def get_args(raw_args):
             " increase this value to 1e-5 or 1e-4. Default: 1e-6"
         ),
     )
+    parser.add_argument(
+        "--save_with_external_data",
+        action="store_true",
+        help="Save the model with external data. Default: False",
+    )
     return parser.parse_args(raw_args)
 
 
@@ -86,6 +91,7 @@ def main(raw_args=None):
     with open("whisper_template.json") as f:  # noqa: PTH123
         template_json = json.load(f)
     model_name = args.model_name
+    has_external_data = args.save_with_external_data or "whisper-large" in model_name or "whisper-medium" in model_name
 
     # update model name
     template_json["input_model"]["config"]["hf_config"]["model_name"] = model_name
@@ -123,6 +129,9 @@ def main(raw_args=None):
         config["passes"] = {}
         for pass_name in workflow:
             pass_config = deepcopy(template_json["passes"][pass_name])
+            if has_external_data:
+                pass_config["config"] = pass_config.get("config") or {}
+                pass_config["config"].update({"save_as_external_data": True, "all_tensors_to_one_file": True})
             if pass_name == "insert_beam_search":
                 pass_config["config"]["fp16"] = precision == "fp16"
             if pass_name == "mixed_precision":
