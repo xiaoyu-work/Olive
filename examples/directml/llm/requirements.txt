@@ -1,3 +1,4 @@
+einops
 
 gradio==3.42.0 # Gradio 3.47 breaks the UI and versions between 3.42 and 3.47 haven't been tested
 huggingface-hub

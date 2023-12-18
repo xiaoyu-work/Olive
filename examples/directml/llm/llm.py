@@ -26,17 +26,42 @@ def set_config_parameters(repo_id: str, num_layers: Optional[int]):
     tokenizer = transformers.AutoTokenizer.from_pretrained(repo_id)
 
     pipeline = transformers.pipeline(
-        "text-generation", model=repo_id, tokenizer=tokenizer, torch_dtype=torch.float32, device="cpu"
+        "text-generation",
+        model=repo_id,
+        tokenizer=tokenizer,
+        torch_dtype=torch.float32,
+        device="cpu",
+        trust_remote_code=True,
     )
 
     config.hidden_size = pipeline.model.config.hidden_size
-    config.intermediate_size = pipeline.model.config.intermediate_size
     config.num_heads = pipeline.model.config.num_attention_heads
-    config.num_key_value_heads = pipeline.model.config.num_key_value_heads
     config.num_layers = num_layers or pipeline.model.config.num_hidden_layers
     config.vocab_size = pipeline.model.config.vocab_size
     config.normalization_type = "rms" if hasattr(pipeline.model.config, "rms_norm_eps") else "layer_norm"
     config.strict_weights_loading = config.num_layers == pipeline.model.config.num_hidden_layers
+
+    if hasattr(pipeline.model.config, "num_key_value_heads"):
+        config.num_key_value_heads = pipeline.model.config.num_key_value_heads
+    elif hasattr(pipeline.model.config, "n_head_kv"):
+        config.num_key_value_heads = pipeline.model.config.n_head_kv or config.num_heads
+    else:
+        raise ValueError("num_key_value_heads was not found")
+
+    if hasattr(pipeline.model.config, "activation_function"):
+        config.activation_function = pipeline.model.config.activation_function
+    elif hasattr(pipeline.model.config, "hidden_act"):
+        config.activation_function = pipeline.model.config.hidden_act
+    else:
+        raise ValueError("activation_function was not found")
+
+    if hasattr(pipeline.model.config, "intermediate_size"):
+        config.intermediate_size = pipeline.model.config.intermediate_size
+    elif hasattr(pipeline.model.config, "n_inner"):
+        config.intermediate_size = pipeline.model.config.n_inner or 4 * config.hidden_size
+    else:
+        raise ValueError("intermediate_size was not found")
+
     config.state_dict = pipeline.model.state_dict()
 
 
@@ -157,7 +182,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_type",
         default="llama-2-7b-chat",
-        choices=["llama-2-7b-chat", "mistral-7b-chat"],
+        choices=["llama-2-7b-chat", "mistral-7b-chat", "phi-2"],
         help="Which model to convert.",
         type=str,
     )
@@ -176,6 +201,7 @@ if __name__ == "__main__":
     repo_id = {
         "llama-2-7b-chat": "meta-llama/Llama-2-7b-chat-hf",
         "mistral-7b-chat": "mistralai/Mistral-7B-Instruct-v0.1",
+        "phi-2": "microsoft/phi-2",
     }[args.model_type]
 
     model_name = repo_id.replace("/", "_")

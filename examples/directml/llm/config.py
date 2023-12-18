@@ -7,6 +7,7 @@ decoder_model = None
 normalization_type = None
 state_dict = None
 strict_weights_loading = True
+activation_function = "silu"
 hidden_size = 4096
 intermediate_size = 11008
 num_heads = 32

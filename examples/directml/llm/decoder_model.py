@@ -3,6 +3,8 @@
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
 
+import math
+
 import numpy as np
 import torch
 
@@ -18,6 +20,7 @@ class DecoderModel(torch.nn.Module):
         num_key_value_heads: int,
         scale_type: str,
         normalization_type: str,
+        activation_function: str,
     ) -> None:
         super().__init__()
         self.model = Model(
@@ -29,6 +32,7 @@ class DecoderModel(torch.nn.Module):
             num_key_value_heads,
             scale_type,
             normalization_type,
+            activation_function,
         )
         self.lm_head = torch.nn.Linear(hidden_size, vocab_size, bias=False)
 
@@ -67,6 +71,7 @@ class Model(torch.nn.Module):
         num_key_value_heads: int,
         scale_type: str,
         normalization_type: str,
+        activation_function: str,
     ) -> None:
         super().__init__()
         self.embed_tokens = torch.nn.Embedding(vocab_size, hidden_size)
@@ -85,6 +90,7 @@ class Model(torch.nn.Module):
                 num_key_value_heads,
                 scale_type,
                 normalization_type,
+                activation_function,
             )
             self.layers.append(layer)
 
@@ -167,6 +173,7 @@ class TransformerLayer(torch.nn.Module):
         num_key_value_heads: int,
         scale_type: str,
         normalization_type: str,
+        activation_function: str,
     ) -> None:
         super().__init__()
         self.input_layernorm = {
@@ -187,7 +194,7 @@ class TransformerLayer(torch.nn.Module):
             num_key_value_heads,
             scale_type,
         )
-        self.mlp = ProjLayerSiluMatMul(hidden_size, intermediate_size)
+        self.mlp = MLP(hidden_size, intermediate_size, activation_function)
 
     def forward(
         self,
@@ -359,18 +366,30 @@ class SelfAttention(torch.nn.Module):
         return self.o_proj(attn), k_cache, v_cache
 
 
-class ProjLayerSiluMatMul(torch.nn.Module):
+class MLP(torch.nn.Module):
     def __init__(
         self,
         hidden_size: int,
         intermediate_size: int,
+        activation_function: str,
     ) -> None:
         super().__init__()
         self.gate_proj = torch.nn.Linear(hidden_size, intermediate_size, bias=False)
         self.down_proj = torch.nn.Linear(intermediate_size, hidden_size, bias=False)
         self.up_proj = torch.nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.activation_function = activation_function
 
     def forward(self, x):
         w1x = self.gate_proj(x)
 
-        return self.down_proj(w1x * torch.sigmoid(w1x) * self.up_proj(x))
+        if self.activation_function == "gelu_new":
+            # https://arxiv.org/abs/1606.08415
+            activated = (
+                0.5 * w1x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (w1x + 0.044715 * torch.pow(w1x, 3.0))))
+            )
+        elif self.activation_function == "silu":
+            activated = w1x * torch.sigmoid(w1x)
+        else:
+            raise ValueError(f"Unknown activation function {self.activation_function}")
+
+        return self.down_proj(activated * self.up_proj(x))

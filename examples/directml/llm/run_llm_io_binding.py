@@ -74,13 +74,13 @@ def run_llm_io_binding(
         v_caches.append(onnxruntime.OrtValue.ortvalue_from_numpy(initial_cache, binding_device))
 
     llm_io_binding.bind_cpu_input("use_cache_branch", np.zeros([1], dtype=np.bool_))
-    llm_io_binding.bind_output("logits", "cpu")
 
     before_time = time.perf_counter()
 
     # Iteratively generate tokens.
     output_tokens = []
     for idx in range(max_gen_len):
+        llm_io_binding.bind_output("logits", "cpu")
         if idx == 0:
             position_ids = np.arange(seq_len, dtype=np.int64).reshape((1, seq_len))
             llm_io_binding.bind_cpu_input("position_ids", position_ids)
