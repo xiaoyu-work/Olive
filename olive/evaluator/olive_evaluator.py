@@ -41,6 +41,7 @@ from olive.model import (
     ONNXModelHandler,
     OpenVINOModelHandler,
     PyTorchModelHandler,
+    QNNModelHandler,
     SNPEModelHandler,
 )
 from olive.model.config.io_config import is_io_config_static
@@ -1089,3 +1090,43 @@ class OliveEvaluatorConfig(ConfigBase):
             raise ValueError(f"Priorities must be unique and in the range 1 to {metric_len}")
 
         return v
+
+
+class QNNEvauator(OliveEvaluator, framework=Framework.QNN):
+    def __init__(self):
+        super().__init__()
+
+    def _inference(
+        self,
+        model: QNNModelHandler,
+        metric: Metric,
+        dataloader: Dataset,
+        post_func=None,
+        device: Device = Device.CPU,
+        execution_providers: Union[str, List[str]] = None,
+    ) -> Tuple[OliveModelOutput, Any]:
+        ...
+
+    def _evaluate_accuracy(
+        self,
+        model: QNNModelHandler,
+        data_root: str,
+        metric: Metric,
+        dataloader: Dataset,
+        post_func=None,
+        device: Device = Device.CPU,
+        execution_providers: Union[str, List[str]] = None,
+    ) -> MetricResult:
+        ...
+
+    def _evaluate_raw_latency(
+        self,
+        model: QNNModelHandler,
+        data_root: str,
+        metric: Metric,
+        dataloader: Dataset,
+        post_func=None,
+        device: Device = Device.CPU,
+        execution_providers: Union[str, List[str]] = None,
+    ):
+        ...

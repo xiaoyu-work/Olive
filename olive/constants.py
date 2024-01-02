@@ -9,10 +9,11 @@ class Framework(str, Enum):
     """Framework of the model."""
 
     ONNX = "ONNX"
-    PYTORCH = "PyTorch"
-    TENSORFLOW = "TensorFlow"
-    SNPE = "SNPE"
     OPENVINO = "OpenVINO"
+    PYTORCH = "PyTorch"
+    SNPE = "SNPE"
+    QNN = "QNN"
+    TENSORFLOW = "TensorFlow"
 
 
 class ModelFileFormat(str, Enum):
