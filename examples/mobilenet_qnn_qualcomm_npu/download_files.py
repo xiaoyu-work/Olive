@@ -81,13 +81,21 @@ def download_eval_data():
         shutil.rmtree(data_path)
     data_path.mkdir(parents=True, exist_ok=True)
 
+    input_data_path = data_dir / "input"
+    input_data_path.mkdir(parents=True, exist_ok=True)
+    input_order = []
     # preprocess images
     inputs = []
     for jpeg in jpegs[:20]:
         out = preprocess_image(jpeg)
+        input_file_name = (input_data_path / jpeg.name).with_suffix(".raw")
+        out.tofile(input_file_name)
+        input_order.append(input_file_name)
         inputs.append(out)
     inputs = np.stack(inputs)
     np.save(data_path / "data.npy", inputs)
+    with (data_dir / "input_order.txt").open("w") as f:
+        f.write("\n".join([str(x) for x in input_order]) + "\n")
 
     # create labels file
     labels = np.arange(0, 20)

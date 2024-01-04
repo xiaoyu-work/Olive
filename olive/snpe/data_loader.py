@@ -220,7 +220,7 @@ class SNPECommonDataLoader(SNPEDataLoader):
     """SNPE dataloader created from a common dataloader such as torch.data.DataLoader."""
 
     def __init__(self, dataloader: Any, io_config: dict, batch_size: int = None):
-        """Intialize SNPE Dataloader.
+        """Initialize SNPE Dataloader.
 
         :param dataloader: dataloader object. Dataloader must be iterable and return a tuple of (input, target).
         input is a dictionary of input names and input tensors.
