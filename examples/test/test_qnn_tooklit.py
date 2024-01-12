@@ -19,7 +19,7 @@ def download_qnn_sdk():
         blob="qnn_snpe_sdk_linux.zip",
         download_path="qnn_snpe_sdk_linux.zip",
     )
-    target_path = (Path(__file__).resolve() / "qnn_snpe_sdk_linux").resolve()
+    target_path = Path("./qnn_snpe_sdk_linux").resolve()
     target_path.mkdir(parents=True, exist_ok=True)
     run_subprocess(cmd="unzip qnn_snpe_sdk_linux.zip ", capture_output=True, check=True)
     with zipfile.ZipFile("qnn_snpe_sdk_linux.zip", "r") as zip_ref:
