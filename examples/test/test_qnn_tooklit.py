@@ -15,7 +15,7 @@ from olive.common.utils import retry_func, run_subprocess
 def download_qnn_sdk():
     """Download the qnn sdk."""
     download_azure_blob(
-        container="qualcomm-sdk",
+        container="olivetest",
         blob="qnn_snpe_sdk_linux.zip",
         download_path="qnn_snpe_sdk_linux.zip",
     )
