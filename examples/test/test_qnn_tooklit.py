@@ -21,7 +21,7 @@ def download_qnn_sdk():
     )
     target_path = Path("./qnn_snpe_sdk_linux").resolve()
     target_path.mkdir(parents=True, exist_ok=True)
-    run_subprocess(cmd="unzip qnn_snpe_sdk_linux.zip ", capture_output=True, check=True)
+    run_subprocess(cmd="unzip qnn_snpe_sdk_linux.zip", check=True)
     with zipfile.ZipFile("qnn_snpe_sdk_linux.zip", "r") as zip_ref:
         zip_ref.extractall(target_path)
     return str(target_path)
