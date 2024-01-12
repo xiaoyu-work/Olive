@@ -38,7 +38,7 @@ def setup():
     # retry since it fails randomly
     retry_func(run_subprocess, kwargs={"cmd": "python download_files.py", "check": True})
     retry_func(run_subprocess, kwargs={"cmd": "python prepare_config.py --use_raw_qnn_sdk", "check": True})
-    os.environ["QNN_SDK_ROOT"] = download_qnn_sdk()
+    os.environ["QNN_SDK_ROOT"] = str(Path(download_qnn_sdk()) / "opt" / "qcom" / "aistack")
     yield
     os.chdir(cur_dir)
 
