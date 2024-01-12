@@ -46,5 +46,5 @@ def setup():
 def test_mobilenet_qnn():
     from olive.workflows import run as olive_run
 
-    footprint = olive_run("raw_qnn_sdk_config")
+    footprint = olive_run("raw_qnn_sdk_config.json")
     check_output(footprint)
