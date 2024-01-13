@@ -3,7 +3,6 @@
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
 import os
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -19,12 +18,10 @@ def download_qnn_sdk():
         blob="qnn_snpe_sdk_linux.zip",
         download_path="qnn_snpe_sdk_linux.zip",
     )
-    target_path = Path("./qnn_snpe_sdk_linux").resolve()
-    target_path.mkdir(parents=True, exist_ok=True)
-    run_subprocess(cmd="unzip qnn_snpe_sdk_linux.zip", check=True)
-    with zipfile.ZipFile("qnn_snpe_sdk_linux.zip", "r") as zip_ref:
-        zip_ref.extractall(target_path)
-    return str(target_path)
+    target_path = Path().resolve()
+    run_subprocess(cmd=f"unzip qnn_snpe_sdk_linux.zip -d {str(target_path)}", check=True)
+
+    return target_path / "qnn_snpe_sdk_linux"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -38,7 +35,7 @@ def setup():
     # retry since it fails randomly
     retry_func(run_subprocess, kwargs={"cmd": "python download_files.py", "check": True})
     retry_func(run_subprocess, kwargs={"cmd": "python prepare_config.py --use_raw_qnn_sdk", "check": True})
-    os.environ["QNN_SDK_ROOT"] = str(Path(download_qnn_sdk()) / "opt" / "qcom" / "aistack")
+    os.environ["QNN_SDK_ROOT"] = str(download_qnn_sdk() / "opt" / "qcom" / "aistack")
     yield
     os.chdir(cur_dir)
 
