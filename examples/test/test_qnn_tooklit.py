@@ -21,7 +21,7 @@ def download_qnn_sdk():
     target_path = Path().resolve()
     run_subprocess(cmd=f"unzip qnn_snpe_sdk_linux.zip -d {str(target_path)}", check=True)
 
-    return target_path / "qnn_snpe_sdk_linux"
+    return target_path
 
 
 @pytest.fixture(scope="module", autouse=True)
