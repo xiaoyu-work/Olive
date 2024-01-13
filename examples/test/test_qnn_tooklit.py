@@ -20,6 +20,7 @@ def download_qnn_sdk():
     )
     target_path = Path().resolve()
     run_subprocess(cmd=f"unzip qnn_sdk_linux.zip -d {str(target_path)}", check=True)
+    run_subprocess(cmd="python -m olive.platform_sdk.qualcomm.configure --py_version 3.8 --sdk qnn", check=True)
 
     return target_path
 
