@@ -34,6 +34,12 @@ def setup():
     # retry since it fails randomly
     os.environ["QNN_SDK_ROOT"] = str(download_qnn_sdk() / "opt" / "qcom" / "aistack")
     run_subprocess(cmd="python -m olive.platform_sdk.qualcomm.configure --py_version 3.8 --sdk qnn", check=True)
+    # install dependencies
+    install_cmd = [
+        str(Path(os.environ["QNN_SDK_ROOT"]) / "olive-pyenv" / "bin" / "python"),
+        str(Path(os.environ["QNN_SDK_ROOT"]) / "bin" / "check-python-dependency"),
+    ]
+    run_subprocess(cmd="\n".join(install_cmd), check=True)
     retry_func(run_subprocess, kwargs={"cmd": "python download_files.py", "check": True})
     retry_func(run_subprocess, kwargs={"cmd": "python prepare_config.py --use_raw_qnn_sdk", "check": True})
     yield
