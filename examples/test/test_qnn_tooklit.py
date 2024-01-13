@@ -20,8 +20,6 @@ def download_qnn_sdk():
     )
     target_path = Path().resolve()
     run_subprocess(cmd=f"unzip qnn_sdk_linux.zip -d {str(target_path)}", check=True)
-    run_subprocess(cmd="python -m olive.platform_sdk.qualcomm.configure --py_version 3.8 --sdk qnn", check=True)
-
     return target_path
 
 
@@ -34,9 +32,10 @@ def setup():
 
     # prepare model and data
     # retry since it fails randomly
+    os.environ["QNN_SDK_ROOT"] = str(download_qnn_sdk() / "opt" / "qcom" / "aistack")
+    run_subprocess(cmd="python -m olive.platform_sdk.qualcomm.configure --py_version 3.8 --sdk qnn", check=True)
     retry_func(run_subprocess, kwargs={"cmd": "python download_files.py", "check": True})
     retry_func(run_subprocess, kwargs={"cmd": "python prepare_config.py --use_raw_qnn_sdk", "check": True})
-    os.environ["QNN_SDK_ROOT"] = str(download_qnn_sdk() / "opt" / "qcom" / "aistack")
     yield
     os.chdir(cur_dir)
 
