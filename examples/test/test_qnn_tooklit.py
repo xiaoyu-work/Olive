@@ -15,11 +15,11 @@ def download_qnn_sdk():
     """Download the qnn sdk."""
     download_azure_blob(
         container="olivetest",
-        blob="qnn_snpe_sdk_linux.zip",
-        download_path="qnn_snpe_sdk_linux.zip",
+        blob="qnn_sdk_linux.zip",
+        download_path="qnn_sdk_linux.zip",
     )
     target_path = Path().resolve()
-    run_subprocess(cmd=f"unzip qnn_snpe_sdk_linux.zip -d {str(target_path)}", check=True)
+    run_subprocess(cmd=f"unzip qnn_sdk_linux.zip -d {str(target_path)}", check=True)
 
     return target_path
 
