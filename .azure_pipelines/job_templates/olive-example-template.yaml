@@ -43,9 +43,9 @@ jobs:
       displayName: Set exampleRequirements
       condition: eq(variables['exampleRequirements'], '')
 
-    - ${{ if startsWith(exampleFolder, 'mobilenet_qnn') }}:
-      - powershell: Write-Host "##vso[task.prependpath]$env:CONDA\Scripts"
-        displayName: Add conda to PATH
+    - powershell: Write-Host "##vso[task.prependpath]$env:CONDA\Scripts"
+      displayName: Add conda to PATH
+      condition: eq(variables['exampleFolder'], 'mobilenet_qnn_qualcomm_npu')
 
     - task: AzureCLI@1
       inputs:
