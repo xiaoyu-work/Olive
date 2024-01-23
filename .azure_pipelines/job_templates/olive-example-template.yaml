@@ -43,6 +43,10 @@ jobs:
       displayName: Set exampleRequirements
       condition: eq(variables['exampleRequirements'], '')
 
+    - powershell: Write-Host "##vso[task.prependpath]$env:CONDA\Scripts"
+      displayName: Add conda to PATH
+      condition: eq(parameters.name, 'Windows_CI')
+
     - task: AzureCLI@1
       inputs:
         azureSubscription: $(OLIVE_RG_SERVICE_CONNECTION)
