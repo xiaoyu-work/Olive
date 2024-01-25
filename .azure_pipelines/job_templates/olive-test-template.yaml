@@ -24,6 +24,7 @@ jobs:
   - task: UsePythonVersion@0
     inputs:
       versionSpec: $(python_version)
+      githubToken: ${{ secrets.GITHUB_TOKEN }}
     displayName: Use Python $(python_version)
 
   - script: docker system df && docker system prune -a -f && docker system df
@@ -108,6 +109,12 @@ jobs:
       testRunTitle: '$(Build.BuildNumber)[$(Agent.JobName)]'
       failTaskOnFailedTests: true
     displayName: Upload pipeline run test results
+
+  - task: useDotNet@2
+    inputs:
+      packageType: 'sdk'
+      version: '6.0.x'
+    displayName: 'Use .NET 6.0 SDK'
 
   - task: PublishCodeCoverageResults@1
     inputs:
