@@ -46,12 +46,12 @@ def run_llm_io_binding(
     llm_session_options.add_free_dimension_override_by_name("batch_size", 1)
     llm_session_options.add_free_dimension_override_by_name("max_seq_len", max_seq_len)
     llm_session_options.add_free_dimension_override_by_name("seq_len_increment", 1)
+
     llm_session = onnxruntime.InferenceSession(
         os.path.join(model_dir, "decoder_model_merged.onnx"),
         sess_options=llm_session_options,
         providers=providers,
     )
-
     data_type = np.float16
     num_layers = 0
     for inputs_meta in llm_session._inputs_meta:
@@ -142,7 +142,7 @@ def run_llm_io_binding(
         print(f"Execution took {duration:0.4f} seconds (generated {tokens_per_second:0.2f} tokens per second)")
 
     output_str = tokenizer.decode(output_tokens, skip_special_tokens=True)
-
+    
     print(output_str)
 
 

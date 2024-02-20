@@ -6,6 +6,7 @@
 import numpy as np
 import torch
 
+import config
 
 class DecoderModel(torch.nn.Module):
     def __init__(
@@ -39,7 +40,7 @@ class DecoderModel(torch.nn.Module):
             apply_residual_connection_post_layernorm,
             use_embeddings,
         )
-        self.lm_head = torch.nn.Linear(hidden_size, vocab_size, bias=False)
+        self.lm_head = torch.nn.Linear(hidden_size, vocab_size, bias=config.partial_rotary_factor!=1.0)
 
     def forward_common(self, use_cache, tokens_or_embeddings, position_ids_increment, attention_mask, cache):
         hidden_states, k_caches, v_caches = self.model(
@@ -205,7 +206,7 @@ class TransformerLayer(torch.nn.Module):
                 "rms": RMSNorm(hidden_size, epsilon),
             }[normalization_type]
 
-        self.cos, self.sin = rotary_mat(hidden_size, num_heads, 4096, head_scale=1.0)
+        self.cos, self.sin = rotary_mat(hidden_size, num_heads, config.max_position_embeddings, head_scale=config.partial_rotary_factor)
 
         self.self_attn = SelfAttention(
             hidden_size,
@@ -213,7 +214,11 @@ class TransformerLayer(torch.nn.Module):
             num_key_value_heads,
             scale_type,
         )
-        self.mlp = MLP(model_type, hidden_size, intermediate_size)
+
+        if config.partial_rotary_factor != 1.0:
+            self.mlp = PhiMLP(hidden_size, intermediate_size)
+        else:
+            self.mlp = MLP(model_type, hidden_size, intermediate_size)
 
     def forward(
         self,
@@ -249,13 +254,13 @@ class ApplyMask(torch.nn.Module):
         # The mask contains 1's for values that should stay intact, and 0's for values that should get added to -10000
         expanded_mask = attention_mask[:, None, None, :].expand(-1, 1, seq_len, -1).to(dtype)
         inverted_mask = 1.0 - expanded_mask
-        mask_score = inverted_mask.masked_fill(inverted_mask.to(torch.bool), -10000.0)
+        mask_score = inverted_mask.masked_fill(inverted_mask.to(torch.bool), torch.finfo(torch.float16).min)
 
         if not use_cache:
             batch_size, max_seq_len = attention_mask.size()
             causal_mask = torch.tril(torch.ones((batch_size, 1, seq_len, max_seq_len)), diagonal=max_seq_len - seq_len)
             inverted_causal_mask = 1.0 - causal_mask
-            mask_score += inverted_causal_mask.masked_fill(inverted_causal_mask.to(torch.bool), -10000.0)
+            mask_score += inverted_causal_mask.masked_fill(inverted_causal_mask.to(torch.bool), torch.finfo(torch.float16).min)
 
         mask_score = mask_score.expand(-1, num_heads, -1, -1)
 
@@ -300,7 +305,6 @@ def broadcast_key_value(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
-
 class SelfAttention(torch.nn.Module):
     def __init__(
         self,
@@ -311,12 +315,12 @@ class SelfAttention(torch.nn.Module):
     ) -> None:
         super().__init__()
         self.head_dim = int(hidden_size / num_heads)
-
+        self.partial_dim = int(config.partial_rotary_factor * self.head_dim)
         key_value_hidden_size = num_key_value_heads * self.head_dim
-        self.q_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
-        self.k_proj = torch.nn.Linear(hidden_size, key_value_hidden_size, bias=False)
-        self.v_proj = torch.nn.Linear(hidden_size, key_value_hidden_size, bias=False)
-        self.o_proj = torch.nn.Linear(hidden_size, hidden_size, bias=False)
+        self.q_proj = torch.nn.Linear(hidden_size, hidden_size, bias = config.partial_rotary_factor!=1.0)
+        self.k_proj = torch.nn.Linear(hidden_size, key_value_hidden_size, bias = config.partial_rotary_factor!=1.0)
+        self.v_proj = torch.nn.Linear(hidden_size, key_value_hidden_size, bias = config.partial_rotary_factor!=1.0)
+        self.o_proj = torch.nn.Linear(hidden_size, hidden_size, bias = config.partial_rotary_factor!=1.0)
         self.apply_mask = ApplyMask()
         self.rotary_embedding = RotaryEmbedding()
 
@@ -354,9 +358,28 @@ class SelfAttention(torch.nn.Module):
         key = torch.reshape(key, [batch_size, seq_len, self.num_key_value_heads, self.head_dim]).transpose(1, 2)
         value = torch.reshape(value, [batch_size, seq_len, self.num_key_value_heads, self.head_dim]).transpose(1, 2)
 
+        # Partial rotary embedding for phi-2
+        if config.partial_rotary_factor != 1.0:
+            query_rot, query_pass = (
+                query[..., : self.partial_dim],
+                query[..., self.partial_dim:],
+            )
+            key_rot, key_pass = (
+                key[..., : self.partial_dim],
+                key[..., self.partial_dim:],
+            )
+
+            query_rot = self.rotary_embedding(query_rot, cos, sin, position_ids)
+            key_rot = self.rotary_embedding(key_rot, cos, sin, position_ids)
+
+            query = torch.cat((query_rot, query_pass), dim=-1)
+            key = torch.cat((key_rot, key_pass), dim=-1)
+        
+        
         # Apply rotary positional embedding
-        query = self.rotary_embedding(query, cos, sin, position_ids)
-        key = self.rotary_embedding(key, cos, sin, position_ids)
+        else:
+            query = self.rotary_embedding(query, cos, sin, position_ids)
+            key = self.rotary_embedding(key, cos, sin, position_ids)
 
         # Append new entries to the end of k, v cache
         k_cache = torch.cat((k_cache, key), dim=2)
@@ -374,13 +397,14 @@ class SelfAttention(torch.nn.Module):
         key = key.permute([0, 1, 3, 2])
 
         # Calculate attention scores
-        score = torch.matmul(query, key) / self.scale
+        score = torch.matmul(query.to(torch.float32), key.to(torch.float32)) / self.scale
 
         # Apply the mask
         score = self.apply_mask(use_cache, score, attention_mask, seq_len, self.num_heads)
 
         # Calculate attention values
-        prob = torch.nn.functional.softmax(score, dim=-1)
+        prob = torch.nn.functional.softmax(score, dim=-1).to(query.dtype)
+
         attn = torch.matmul(prob, value)
 
         # Merge attention heads
@@ -412,3 +436,28 @@ class MLP(torch.nn.Module):
             return self.down_proj(self.act(w1x))
         else:
             return self.down_proj(w1x * torch.sigmoid(w1x) * self.up_proj(x))
+
+import math
+class NewGELUActivation(torch.nn.Module):
+    """
+    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
+    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
+    """
+
+    def forward(self, input):
+        return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+
+class PhiMLP(torch.nn.Module):
+    def __init__(self,
+                hidden_size: int,
+                intermediate_size: int,):
+        super().__init__()
+        self.activation_fn = NewGELUActivation()
+        self.fc1 = torch.nn.Linear(hidden_size, intermediate_size)
+        self.fc2 = torch.nn.Linear(intermediate_size, hidden_size)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states

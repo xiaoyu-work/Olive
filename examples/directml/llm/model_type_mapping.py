@@ -27,6 +27,7 @@ def get_supported_llm_models():
         "openchat-7b-3.5",
         "neural-chat-7b-v3.1",
         "tinyllama-1.1b-chat-v0.6",
+        "phi-2"
     ]
 
 def get_all_supported_models():
@@ -52,6 +53,7 @@ def get_model_repo_id(model_type: str):
         "openchat-7b-3.5": "openchat/openchat_3.5",
         "neural-chat-7b-v3.1": "Intel/neural-chat-7b-v3-1",
         "tinyllama-1.1b-chat-v0.6": "TinyLlama/TinyLlama-1.1B-Chat-v0.6",
+        "phi-2": "microsoft/phi-2",
     }[model_type]
 
 def get_model_name(model_type: str):

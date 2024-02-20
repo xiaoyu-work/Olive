@@ -17,3 +17,5 @@ epsilon = 1e-5
 model_type = "llama"
 apply_residual_connection_post_layernorm = True
 model_id = "meta-llama/Llama-2-7b-chat-hf"
+partial_rotary_factor = 1.0
+max_position_embeddings = 4096

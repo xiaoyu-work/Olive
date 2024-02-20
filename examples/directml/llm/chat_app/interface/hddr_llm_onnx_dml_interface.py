@@ -55,19 +55,30 @@ class LLMOnnxDmlInterface(BaseLLMInterface):
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_dir)
 
         if self.tokenizer.chat_template is None:
-            self.tokenizer.chat_template = (
-                "{% for message in messages %}"
-                "{% if message['role'] == 'user' %}"
-                "{{ ' ' }}"
-                "{% endif %}"
-                "{{ message['content'] }}"
-                "{% if not loop.last %}"
-                "{{ '  ' }}"
-                "{% endif %}"
-                "{% endfor %}"
-                "{{ eos_token }}"
-            )
-
+            if "phi" in self.model_dir:
+                self.tokenizer.chat_template = (
+                    "{% for message in messages %}"
+                    "{% if message['role'] == 'user' %}"
+                    "Human: {{ message['content'] }}\nAI:"
+                    "{% endif %}"
+                    "{% if message['role'] == 'assistant' %}"
+                    "{{ message['content'] }}\n"
+                    "{% endif %}"
+                    "{% endfor %}"
+                )
+            else:
+                self.tokenizer.chat_template = (
+                    "{% for message in messages %}"
+                    "{% if message['role'] == 'user' %}"
+                    "{{ ' ' }}"
+                    "{% endif %}"
+                    "{{ message['content'] }}"
+                    "{% if not loop.last %}"
+                    "{{ '  ' }}"
+                    "{% endif %}"
+                    "{% endfor %}"
+                    "{{ eos_token }}"
+                )
         # Create the I/O bindings
         self.llm_io_binding = self.llm_session.io_binding()
 
