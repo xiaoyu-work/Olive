@@ -94,7 +94,7 @@ def get_encdec_io_config(olive_model: PyTorchModelHandler):
 
     return {
         "input_names": input_names,
-        "dynamic_axes": dynamic_axes,
+        # "dynamic_axes": dynamic_axes,
         "output_names": output_names,
         "string_to_int_dim_params": [num_heads, hidden_size, head_size],
     }
@@ -137,7 +137,7 @@ def get_dec_io_config(olive_model: PyTorchModelHandler):
 
     return {
         "input_names": input_names,
-        "dynamic_axes": dynamic_axes,
+        # "dynamic_axes": dynamic_axes,
         "output_names": output_names,
     }
 

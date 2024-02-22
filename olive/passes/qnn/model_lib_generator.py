@@ -73,6 +73,7 @@ class QNNModelLibGenerator(Pass):
             input_model_bin = None
 
         output_model_path = Path(output_model_path).resolve()
+        output_model_path.parent.mkdir(parents=True, exist_ok=True)
 
         cmd_list = [
             main_cmd,
