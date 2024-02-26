@@ -281,10 +281,12 @@ def snpe_net_run(
         snpe_diag_log = tmp_dir_path / f"SNPEDiag_{run}.log"
         snpe_diag_csv = tmp_dir_path / f"SNPEDiag_{run}.csv"
         # print the files under snpe_diag_log
-        for file in snpe_diag_log.iterdir():
+        if not tmp_dir_path.exists():
+            raise FileNotFoundError(f"SNPE DiagLog directory {tmp_dir_path} not found for run {run}")
+        for file in tmp_dir_path.iterdir():
             logger.debug("SNPE DiagLog file %s", file)
         if not snpe_diag_log.exists():
-            logger.error("SNPE DiagLog file %s not found for run %d", snpe_diag_log, run)
+            raise FileNotFoundError("SNPE DiagLog file %s not found for run %d", snpe_diag_log, run)
         cmd = f"snpe-diagview --input_log {snpe_diag_log} --output {snpe_diag_csv}"
         SNPERunner().run(cmd)
 
