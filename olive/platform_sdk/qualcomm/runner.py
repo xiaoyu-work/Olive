@@ -61,7 +61,7 @@ class SDKRunner:
         env = self.sdk_env.env if use_olive_env else None
         for run in range(self.runs):
             run_log_msg = "" if self.runs == 1 else f" (run {run + 1}/{self.runs})"
-            logger.debug("Running %s command%s: %s, with env: %s", self.platform, run_log_msg, cmd, env)
+            logger.debug("Running %s command%s: %s", self.platform, run_log_msg, cmd)
             _, stdout, stderr = run_subprocess(cmd, env, check=True)
             if self.sleep > 0 and run < self.runs - 1:
                 time.sleep(self.sleep)
