@@ -125,6 +125,30 @@
                 "seed": 0
             }
         },
+        "packaging_config": {
+            "type": "AzureML",
+            "azureml_config": {
+                "azureml_client": "azureml_client",
+                "model_name": "olive_model",
+                "model_version": "1",
+                "model_package": {
+                    "target_environment_name": "olive_target_environment",
+                    "target_environment_version": "1",
+                    "inferencing_server": {
+                        "type": "AzureMLOnline",
+                        "code_folder": "code",
+                        "scoring_script": "score.py"
+                    },
+                    "base_environent_id": "azureml:aml-packaging-test:1"
+                },
+                "deployment_config": {
+                    "endpoint_name": "package-test-endpoint",
+                    "deployment_name": "package-test-deployment",
+                    "instance_type": "Standard_DS3_v2",
+                    "instance_count": 1
+                }
+            }
+        },
         "evaluator": "common_evaluator",
         "host": "local_system",
         "target": "local_system",

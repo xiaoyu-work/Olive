@@ -17,7 +17,12 @@ from typing import TYPE_CHECKING, Dict, List
 import pkg_resources
 
 from olive.common.utils import copy_dir, run_subprocess
-from olive.engine.packaging.packaging_config import PackagingConfig, PackagingType
+from olive.engine.packaging.packaging_config import (
+    BaseEnvironmentType,
+    InferencingServerType,
+    PackagingConfig,
+    PackagingType,
+)
 from olive.model import ONNXModelHandler
 from olive.resource_path import ResourceType, create_resource_path
 from olive.systems.utils import get_package_name_from_ep
@@ -25,6 +30,9 @@ from olive.systems.utils import get_package_name_from_ep
 if TYPE_CHECKING:
     from olive.engine.footprint import Footprint
     from olive.hardware import AcceleratorSpec
+    from olive.azureml.azureml_client import AzureMLClientConfig
+
+from olive.model import ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +44,15 @@ def generate_output_artifacts(
     footprints: Dict["AcceleratorSpec", "Footprint"],
     pf_footprints: Dict["AcceleratorSpec", "Footprint"],
     output_dir: Path,
+    azureml_client_config: "AzureMLClientConfig" = None,
 ):
     if sum(len(f.nodes) if f.nodes else 0 for f in pf_footprints.values()) == 0:
         logger.warning("No model is selected. Skip packaging output artifacts.")
         return
     if packaging_config.type == PackagingType.Zipfile:
         _generate_zipfile_output(packaging_config, footprints, pf_footprints, output_dir)
+    if packaging_config.type == PackagingType.AzureML:
+        _generate_azureml_output(packaging_config, pf_footprints, azureml_client_config)
 
 
 def _generate_zipfile_output(
@@ -354,3 +365,144 @@ def _skip_download_c_package(package_path):
     readme_path = package_path / "README.md"
     with readme_path.open("w") as f:
         f.write(warning_msg)
+
+
+def _generate_azureml_output(
+    packaging_config: PackagingConfig, pf_footprint: Footprint, aml_client: AzureMLClientConfig
+):
+    from azure.ai.ml.entities import (
+        AzureMLBatchInferencingServer,
+        AzureMLOnlineInferencingServer,
+        BaseEnvironment,
+        BatchDeployment,
+        BatchEndpoint,
+        CodeConfiguration,
+        ManagedOnlineDeployment,
+        ManagedOnlineEndpoint,
+        ModelConfiguration,
+        ModelPackage,
+    )
+    from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+
+    try:
+        config = packaging_config.azureml_config
+
+        # Get best model from footprint
+        best_node = next(iter(pf_footprint.nodes.values()))
+        olive_model = ModelConfig(**best_node.model_config).create_model()
+
+        # Register model to AzureML
+        aml_client = aml_client.create_client()
+        olive_model.register_to_aml(aml_client=aml_client, name=config.model_name, version=config.model_version)
+
+        # AzureML package config
+        model_package_config = config.model_package
+
+        code_configuration = CodeConfiguration(
+            code=model_package_config.inferencing_server.code_folder,
+            scoring_script=model_package_config.inferencing_server.scoring_script,
+        )
+        inferencing_server = None
+        if model_package_config.inferencing_server.type == InferencingServerType.AzureMLOnline:
+            inferencing_server = AzureMLOnlineInferencingServer(code_configuration=code_configuration)
+        elif model_package_config.inferencing_server.type == InferencingServerType.AzureMLBatch:
+            inferencing_server = AzureMLBatchInferencingServer(code_configuration=code_configuration)
+
+        model_configuration = None
+        if model_package_config.model_configurations:
+            model_configuration = ModelConfiguration(
+                mode=model_package_config.model_configurations.mode,
+                mount_path=model_package_config.model_configurations.mount_path,
+            )
+
+        base_environment_source = BaseEnvironment(
+            type=BaseEnvironmentType.EnvironmentAsset, resource_id=model_package_config.base_environent_id
+        )
+
+        package_request = ModelPackage(
+            target_environment_name=model_package_config.target_environment_name,
+            inferencing_server=inferencing_server,
+            base_environment_source=base_environment_source,
+            target_environment_version=model_package_config.target_environment_version,
+            model_configuration=model_configuration,
+        )
+
+        # invoke model package operation
+        aml_client.ml_client.models.begin_package(
+            name=config.model_name, version=config.model_version, package_request=package_request
+        )
+
+        target_env = aml_client.ml_client.environments.get(
+            model_package_config.target_environment_name, model_package_config.target_environment_version
+        )
+        logger.info(f"Target environment created successfully: name: {target_env.name}, version: {target_env.version}")
+
+        # Deploy model package if deployment config is provided
+        if config.deployment_config:
+            deployment_config = config.deployment_config
+
+            # Get endpoint
+            try:
+                endpoint = aml_client.ml_client.online_endpoints.get(deployment_config.endpoint_name)
+                logger.info(
+                    f"Endpoint {deployment_config.endpoint_name} already exists. The scoring_uri is: {endpoint.scoring_uri}"
+                )
+            except ResourceNotFoundError:
+                logger.info(f"Endpoint {deployment_config.endpoint_name} does not exist. Creating a new endpoint...")
+                if model_package_config.inferencing_server.type == InferencingServerType.AzureMLOnline:
+                    endpoint = ManagedOnlineEndpoint(
+                        name=deployment_config.endpoint_name,
+                        description="this is an endpoint created by Olive automatically",
+                        auth_mode="key",
+                    )
+                elif model_package_config.inferencing_server.type == InferencingServerType.AzureMLBatch:
+                    endpoint = BatchEndpoint(
+                        name=deployment_config.endpoint_name,
+                        description="this is an endpoint created by Olive automatically",
+                        auth_mode="key",
+                    )
+
+                endpoint = aml_client.ml_client.online_endpoints.begin_create_or_update(endpoint).result()
+                logger.info(
+                    f"Endpoint {deployment_config.endpoint_name} created successfully. The scoring_uri is: {endpoint.scoring_uri}"
+                )
+
+            environment_name = f"azureml:{model_package_config.target_environment_name}:{model_package_config.target_environment_version}"
+
+            deployment = None
+            extra_config = deployment_config.extra_config or {}
+            if model_package_config.inferencing_server.type == InferencingServerType.AzureMLOnline:
+                deployment = ManagedOnlineDeployment(
+                    name=deployment_config.deployment_name,
+                    endpoint_name=deployment_config.endpoint_name,
+                    environment=environment_name,
+                    instance_type=deployment_config.instance_type,
+                    instance_count=deployment_config.instance_count,
+                    **extra_config,
+                )
+
+            elif model_package_config.inferencing_server.type == InferencingServerType.AzureMLBatch:
+                deployment = BatchDeployment(
+                    name=deployment_config.endpoint_name,
+                    description="this is an endpoint created by Olive automatically",
+                    auth_mode="key",
+                    mini_batch_size=deployment_config.mini_batch_size,
+                    **extra_config,
+                )
+
+            deployment = aml_client.ml_client.online_deployments.begin_create_or_update(deployment).result()
+            logger.info(f"Deployment {deployment.name} created")
+
+    except ResourceNotFoundError as e:
+        logger.error(
+            f"Failed to generate AzureML output. The resource is not found. Please check the exception details: {e}"
+        )
+        raise e
+    except ResourceExistsError as e:
+        logger.exception(
+            f"Failed to generate AzureML output. The resource already exists. Please check the exception details: {e}"
+        )
+        raise e
+    except Exception as e:
+        logger.exception(f"Failed to generate AzureML output. Please check the exception details: {e}")
+        raise e

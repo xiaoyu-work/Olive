@@ -15,7 +15,7 @@ import olive.cache as cache_utils
 from olive.common.config_utils import ConfigBase, validate_config
 from olive.common.utils import hash_dict
 from olive.engine.config import FAILED_CONFIG, INVALID_CONFIG, PRUNED_CONFIGS, EngineConfig
-from olive.engine.footprint import Footprint, FootprintNodeMetric
+from olive.engine.packaging.packaging_config import PackagingConfig
 from olive.engine.packaging.packaging_generator import generate_output_artifacts
 from olive.evaluator.metric import Metric, MetricResult, joint_metric_key
 from olive.exception import EXCEPTIONS_TO_RAISE, OlivePassError
@@ -298,6 +298,7 @@ class Engine:
                 self.footprints,
                 outputs,
                 output_dir,
+                self.azureml_client_config,
             )
         else:
             logger.info("No packaging config provided, skip packaging artifacts")
