@@ -233,7 +233,7 @@ def optimize(
                 "type": "IncStaticQuantization",
                 "disable_search": True,
                 "config": {
-                    "backend": "onnxrt_cuda_ep",
+                    "backend": f"onnxrt_{device}_ep",
                     "approach": "weight_only",
                     "device": "gpu",
                     "weight_only_config": {"bits": 4, "algorithm": "AWQ"},
@@ -261,19 +261,21 @@ def optimize(
         # Some models are too fragile and need layer norm to be performed in fp32 to keep their accuracy.
         # bfloat16 could fix this, but since DML doesn't support it we need to fall back to fp32.
         print(model_name)
-        models_that_need_fp32_layer_norm = ["llava-hf_llava-1.5-7b-hf", "tiiuae_falcon-7b-instruct", "microsoft_phi-2"]
+        models_that_need_fp32_layer_norm = ["llava-hf_llava-1.5-7b-hf", "tiiuae_falcon-7b-instruct"]
         models_that_need_fp32_mha = ["llava-hf_llava-1.5-7b-hf", "microsoft_phi-2"]
+
+        force_fp32_ops = olive_config["passes"]["optimize"]["config"].get("force_fp32_ops", [])
+
         if model_name in models_that_need_fp32_layer_norm:
-            olive_config["passes"]["optimize"]["config"]["force_fp32_ops"] = [
-                "SimplifiedLayerNormalization",
-                "LayerNormalization",
-            ]
+            force_fp32_ops.extend(["SimplifiedLayerNormalization", "LayerNormalization"])
 
         if model_name in models_that_need_fp32_mha:
-            olive_config["passes"]["optimize"]["config"]["force_fp32_ops"].extend(["MultiHeadAttention"])
+            force_fp32_ops.extend(["MultiHeadAttention"])
 
         if repo_id == "llava-hf/llava-1.5-7b-hf":
             olive_config["passes"]["optimize"]["config"]["replace_attn_mask_input_with_seq_len"] = False
+
+        olive_config["passes"]["optimize"]["config"]["force_fp32_ops"] = force_fp32_ops
 
         # Set the input names and dynamic axes
         io_config = olive_config["input_model"]["config"]["io_config"]
