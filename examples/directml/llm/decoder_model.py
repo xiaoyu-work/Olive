@@ -337,7 +337,7 @@ class MLP(torch.nn.Module):
         self.down_proj = torch.nn.Linear(config.intermediate_size, config.hidden_size, bias=config.use_bias)
 
         self.act = {
-            "silu": None,
+            "silu": torch.nn.SiLU(),
             "gelu_new": NewGELUActivation(),
             "gelu": torch.nn.GELU(),
         }[config.hidden_act]
@@ -348,8 +348,11 @@ class MLP(torch.nn.Module):
     def forward(self, x):
         w1x = self.gate_proj(x)
 
-        print ("activation: ", self.act)
-        if self.act is not None:
+        if config.hidden_act == "silu":
+            w1x, gate = w1x.chunk(2, dim=-1)
+            w1x = w1x * self.act(gate)
+            return self.down_proj()
+        elif self.act is not None:
             return self.down_proj(self.act(w1x))
         else:
             return self.down_proj(w1x * torch.sigmoid(w1x) * self.up_proj(x))

@@ -37,8 +37,8 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
         llm_model = hugggingface_model.language_model
         main_model = hugggingface_model
 
-    elif repo_id == "phi2.5":
-        checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi2.5"
+    elif repo_id == "phi3":
+        checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi3"
         model = transformers.AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype="auto", trust_remote_code=True)
         llm_model = model
         main_model = model
@@ -63,7 +63,7 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
     else:
         config.apply_residual_connection_post_layernorm = True
 
-    config.use_bias = llm_model.config.model_type == "phi"
+    config.use_bias = False
 
     if hasattr(llm_model.config, "hidden_act"):
         config.hidden_act = llm_model.config.hidden_act
