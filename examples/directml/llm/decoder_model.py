@@ -331,7 +331,7 @@ class SelfAttention(torch.nn.Module):
 class MLP(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.gate_proj = torch.nn.Linear(config.hidden_size, 2 * config.intermediate_size, bias=config.use_bias)
+        self.gate_proj = torch.nn.Linear(config.hidden_size, config.intermediate_size, bias=config.use_bias)
         self.down_proj = torch.nn.Linear(config.intermediate_size, config.hidden_size, bias=config.use_bias)
 
         self.act = {
@@ -340,20 +340,20 @@ class MLP(torch.nn.Module):
             "gelu": torch.nn.GELU(),
         }[config.hidden_act]
 
-        if self.act is None:
+        if config.hidden_act == "silu":
             self.up_proj = torch.nn.Linear(config.hidden_size, config.intermediate_size, bias=config.use_bias)
 
     def forward(self, x):
         w1x = self.gate_proj(x)
 
-        if config.hidden_act == "silu":
-            w1x, gate = w1x.chunk(2, dim=-1)
-            w1x = w1x * self.act(gate)
-            return self.down_proj(w1x)
-        elif self.act is not None:
-            return self.down_proj(self.act(w1x))
-        else:
-            return self.down_proj(w1x * torch.sigmoid(w1x) * self.up_proj(x))
+        # if config.hidden_act == "silu":
+        #     w1x, gate = w1x.chunk(2, dim=-1)
+        #     w1x = w1x * self.act(gate)
+        #     return self.down_proj(w1x)
+        # elif self.act is not None:
+        #     return self.down_proj(self.act(w1x))
+        # else:
+        return self.down_proj(w1x * torch.sigmoid(w1x) * self.up_proj(x))
 
 
 class NewGELUActivation(torch.nn.Module):

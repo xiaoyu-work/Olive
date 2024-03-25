@@ -38,7 +38,7 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
         main_model = hugggingface_model
 
     elif "phi3" in repo_id:
-        checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi3"
+        checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi3_13\\phi-3\\phi-3-13b\\phi3_13B_mistral"
         model = transformers.AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype="auto", trust_remote_code=True)
         llm_model = model
         main_model = model
@@ -84,20 +84,21 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
     else:
         config.num_key_value_heads = llm_model.config.num_key_value_heads
 
-    # if hasattr(llm_model.config, "rms_norm_eps"):
-    #     config.normalization_type = "rms"
-    #     config.epsilon = llm_model.config.rms_norm_eps
-    # elif hasattr(llm_model.config, "layer_norm_epsilon"):
-    #     config.normalization_type = "layer_norm"
-    #     config.epsilon = llm_model.config.layer_norm_epsilon
-    # elif hasattr(llm_model.config, "layer_norm_eps"):
-    #     config.normalization_type = "layer_norm"
-    #     config.epsilon = llm_model.config.layer_norm_eps
-    # else:
-    #     raise ValueError("Normalization epsilon value was not found")
+    if hasattr(llm_model.config, "rms_norm_eps"):
+        config.normalization_type = "rms"
+        config.epsilon = llm_model.config.rms_norm_eps
+    elif hasattr(llm_model.config, "layer_norm_epsilon"):
+        config.normalization_type = "layer_norm"
+        config.epsilon = llm_model.config.layer_norm_epsilon
+    elif hasattr(llm_model.config, "layer_norm_eps"):
+        config.normalization_type = "layer_norm"
+        config.epsilon = llm_model.config.layer_norm_eps
+    else:
+        raise ValueError("Normalization epsilon value was not found")
         
-    config.normalization_type = "rms"
-    config.epsilon = llm_model.config.layer_norm_eps
+    # for phi3 3B
+    # config.normalization_type = "rms"
+    # config.epsilon = llm_model.config.layer_norm_eps
 
     print (repo_id)
     config.model_id = repo_id

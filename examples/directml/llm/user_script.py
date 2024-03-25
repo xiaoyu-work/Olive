@@ -49,10 +49,10 @@ def get_or_create_decoder_model():
         if config.model_type == "falcon":
             new_dict = convert_falcon_weights()
             config.decoder_model.load_state_dict(new_dict, strict=config.strict_weights_loading)
-        elif "phi" in config.model_type:
-            new_dict = convert_phi_weights()
-            print ("user bias: ", config.use_bias)
-            config.decoder_model.load_state_dict(new_dict, strict=config.strict_weights_loading)
+        # elif "phi" in config.model_type:
+        #     new_dict = convert_phi_weights()
+        #     print ("user bias: ", config.use_bias)
+        #     config.decoder_model.load_state_dict(new_dict, strict=config.strict_weights_loading)
         else:
             config.decoder_model.load_state_dict(config.state_dict, strict=config.strict_weights_loading)
         decoder_model = config.decoder_model
