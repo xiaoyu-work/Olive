@@ -37,7 +37,7 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
         llm_model = hugggingface_model.language_model
         main_model = hugggingface_model
 
-    elif repo_id == "phi3":
+    elif "phi3" in repo_id:
         checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi3"
         model = transformers.AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype="auto", trust_remote_code=True)
         llm_model = model
@@ -84,21 +84,26 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
     else:
         config.num_key_value_heads = llm_model.config.num_key_value_heads
 
-    if hasattr(llm_model.config, "rms_norm_eps"):
-        config.normalization_type = "rms"
-        config.epsilon = llm_model.config.rms_norm_eps
-    elif hasattr(llm_model.config, "layer_norm_epsilon"):
-        config.normalization_type = "layer_norm"
-        config.epsilon = llm_model.config.layer_norm_epsilon
-    elif hasattr(llm_model.config, "layer_norm_eps"):
-        config.normalization_type = "layer_norm"
-        config.epsilon = llm_model.config.layer_norm_eps
-    else:
-        raise ValueError("Normalization epsilon value was not found")
+    # if hasattr(llm_model.config, "rms_norm_eps"):
+    #     config.normalization_type = "rms"
+    #     config.epsilon = llm_model.config.rms_norm_eps
+    # elif hasattr(llm_model.config, "layer_norm_epsilon"):
+    #     config.normalization_type = "layer_norm"
+    #     config.epsilon = llm_model.config.layer_norm_epsilon
+    # elif hasattr(llm_model.config, "layer_norm_eps"):
+    #     config.normalization_type = "layer_norm"
+    #     config.epsilon = llm_model.config.layer_norm_eps
+    # else:
+    #     raise ValueError("Normalization epsilon value was not found")
+        
+    config.normalization_type = "rms"
+    config.epsilon = llm_model.config.layer_norm_eps
 
     print (repo_id)
     config.model_id = repo_id
-    config.normalization_type = "rms" if hasattr(llm_model.config, "rms_norm_eps") else "layer_norm"
+    # config.normalization_type = "rms" if hasattr(llm_model.config, "rms_norm_eps") else "layer_norm"
+
+    print (config.normalization_type)
     config.partial_rotary_factor = getattr(llm_model.config, "partial_rotary_factor", 1.0)
     config.max_position_embeddings = (
         llm_model.config.max_position_embeddings if hasattr(llm_model.config, "max_position_embeddings") else 4096
@@ -319,9 +324,6 @@ if __name__ == "__main__":
     model_name = get_model_name(args.model_type)
     model_dir = get_model_dir(args.model_type)
     repo_id = get_model_repo_id(args.model_type)
-    print (model_name)
-    print (model_dir)
-    print (repo_id)
 
     if args.optimize or not (model_dir).exists():
         optimize(model_dir, repo_id, model_name, args.device, args.num_layers, args.quant_strategy)

@@ -313,15 +313,13 @@ class SelfAttention(torch.nn.Module):
         key = key.permute([0, 1, 3, 2])
 
         # Calculate attention scores
-        score = torch.matmul(query, key) / np.sqrt(self.head_dim)
+        score = torch.matmul(query.to(torch.float32), key.to(torch.float32)) / np.sqrt(self.head_dim)
 
         # Apply the mask
         score = self.apply_mask(use_cache, score, attention_mask, seq_len)
 
         # Calculate attention values
-        prob = torch.nn.functional.softmax(score, dim=-1)
-        # print (prob.dtype)
-        # print (value.dtype)
+        prob = torch.nn.functional.softmax(score, dim=-1).to(value.dtype)
         attn = torch.matmul(prob, value)
 
         # Merge attention heads
@@ -333,7 +331,7 @@ class SelfAttention(torch.nn.Module):
 class MLP(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.gate_proj = torch.nn.Linear(config.hidden_size, config.intermediate_size, bias=config.use_bias)
+        self.gate_proj = torch.nn.Linear(config.hidden_size, 2 * config.intermediate_size, bias=config.use_bias)
         self.down_proj = torch.nn.Linear(config.intermediate_size, config.hidden_size, bias=config.use_bias)
 
         self.act = {
@@ -351,7 +349,7 @@ class MLP(torch.nn.Module):
         if config.hidden_act == "silu":
             w1x, gate = w1x.chunk(2, dim=-1)
             w1x = w1x * self.act(gate)
-            return self.down_proj()
+            return self.down_proj(w1x)
         elif self.act is not None:
             return self.down_proj(self.act(w1x))
         else:
