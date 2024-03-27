@@ -161,7 +161,8 @@ def decoder_ort_data_loader(data_dir, batch_size, *args, **kwargs):
 def tokenize_function(examples):
     # There's a bug that makes the rust-based fast tokenizer hang randomly (probably due to a deadlock),
     # so use the "slow" python one instead
-    tokenizer = AutoTokenizer.from_pretrained(config.model_id, use_fast=False)
+    print ("user_script line 164: ", config.model_id)
+    tokenizer = AutoTokenizer.from_pretrained(config.model_id, trust_remote_code=True)
     return tokenizer(examples["text"])
 
 

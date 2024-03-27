@@ -36,6 +36,12 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
         hugggingface_model = transformers.LlavaForConditionalGeneration.from_pretrained(repo_id)
         llm_model = hugggingface_model.language_model
         main_model = hugggingface_model
+
+    elif repo_id == "phi2.5":
+        checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi2.5"
+        model = transformers.AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype="auto", trust_remote_code=True)
+        llm_model = model
+        main_model = model
     else:
         pipeline = transformers.pipeline(
             "text-generation", model=repo_id, tokenizer=tokenizer, torch_dtype=torch.float32, device="cpu"
@@ -90,6 +96,7 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
     else:
         raise ValueError("Normalization epsilon value was not found")
 
+    print (repo_id)
     config.model_id = repo_id
     config.normalization_type = "rms" if hasattr(llm_model.config, "rms_norm_eps") else "layer_norm"
     config.partial_rotary_factor = getattr(llm_model.config, "partial_rotary_factor", 1.0)
@@ -312,6 +319,9 @@ if __name__ == "__main__":
     model_name = get_model_name(args.model_type)
     model_dir = get_model_dir(args.model_type)
     repo_id = get_model_repo_id(args.model_type)
+    print (model_name)
+    print (model_dir)
+    print (repo_id)
 
     if args.optimize or not (model_dir).exists():
         optimize(model_dir, repo_id, model_name, args.device, args.num_layers, args.quant_strategy)

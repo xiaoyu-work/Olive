@@ -138,8 +138,8 @@ def run_llm_io_binding(
     tokens_per_second = idx / duration
 
     # Only print the tokens/s when ignore_eos is provided for benchmarking purposes
-    if ignore_eos:
-        print(f"Execution took {duration:0.4f} seconds (generated {tokens_per_second:0.2f} tokens per second)")
+    # if ignore_eos:
+    print(f"Execution took {duration:0.4f} seconds (generated {tokens_per_second:0.2f} tokens per second)")
 
     output_str = tokenizer.decode(output_tokens, skip_special_tokens=True)
 

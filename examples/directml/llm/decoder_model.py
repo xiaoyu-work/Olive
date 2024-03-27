@@ -320,6 +320,8 @@ class SelfAttention(torch.nn.Module):
 
         # Calculate attention values
         prob = torch.nn.functional.softmax(score, dim=-1)
+        # print (prob.dtype)
+        # print (value.dtype)
         attn = torch.matmul(prob, value)
 
         # Merge attention heads
@@ -346,6 +348,7 @@ class MLP(torch.nn.Module):
     def forward(self, x):
         w1x = self.gate_proj(x)
 
+        print ("activation: ", self.act)
         if self.act is not None:
             return self.down_proj(self.act(w1x))
         else:

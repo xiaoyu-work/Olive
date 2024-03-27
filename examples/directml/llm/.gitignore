@@ -1,2 +1,11 @@
 /raw_model_data/
 /footprints/
+
+/phi2.5
+/phi3
+
+
+.idea/
+onnxruntime_directml-1.18.0-cp310-cp310-win_amd64.whl
+phi2_hf.py
+test_model.py

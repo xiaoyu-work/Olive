@@ -30,6 +30,7 @@ def get_supported_llm_models():
         "neural-chat-7b-v3.1",
         "tinyllama-1.1b-chat-v0.6",
         "phi-2",
+        "phi-2.5"
     ]
 
 
@@ -58,6 +59,7 @@ def get_model_repo_id(model_type: str):
         "neural-chat-7b-v3.1": "Intel/neural-chat-7b-v3-1",
         "tinyllama-1.1b-chat-v0.6": "TinyLlama/TinyLlama-1.1B-Chat-v0.6",
         "phi-2": "microsoft/phi-2",
+        "phi-2.5": "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\phi2.5"
     }[model_type]
 
 
