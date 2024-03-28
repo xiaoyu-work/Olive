@@ -18,6 +18,7 @@ SUPPORTED_WORKFLOWS = {
     "cpu_int4": [["convert", "optimize_cpu", "blockwise_quant_int4", "perf_tuning"]],
     "cuda_fp16": [["convert", "optimize_cuda", "perf_tuning"]],
     "cuda_int4": [["convert", "optimize_cuda", "blockwise_quant_int4", "perf_tuning"]],
+    "dml_fp16": [["convert", "optimize_cuda", "perf_tuning"]],
 }
 SUPPORTED_INFERENCE_CONFIG = {
     "cpu_fp32": {
@@ -45,11 +46,18 @@ SUPPORTED_INFERENCE_CONFIG = {
         "use_fp16": True,
         "use_step": platform.system() == "Linux",
     },
+    "dml_fp16": {
+        "use_buffer_share": False,
+        "device_id": 0,
+        "use_fp16": True,
+        "use_step": platform.system() == "Windows",
+    },
 }
 
 DEVICE_TO_EP = {
     "cpu": "CPUExecutionProvider",
     "gpu": "CUDAExecutionProvider",
+    "dml": "DmlExecutionProvider",
 }
 
 
@@ -60,8 +68,8 @@ def get_args(raw_args):
         "--model_type",
         type=str,
         default=None,
-        choices=["cpu_fp32", "cpu_int4", "cuda_fp16", "cuda_int4"],
-        help="Choose from cpu_fp32, cpu_int4, cuda_fp16, cuda_int4",
+        choices=["cpu_fp32", "cpu_int4", "cuda_fp16", "cuda_int4", "dml_fp16"],
+        help="Choose from cpu_fp32, cpu_int4, cuda_fp16, cuda_int4, dml_fp16",
     )
     parser.add_argument(
         "--finetune_method",
@@ -162,6 +170,11 @@ def main(raw_args=None):
             # no need to set device for CPU since default it is CPU
             template_json["systems"]["local_system"]["config"]["accelerators"][0]["execution_providers"] = [
                 "CPUExecutionProvider"
+            ]
+        if "dml" in model_type:
+            template_json["systems"]["local_system"]["config"]["accelerators"][0]["device"] = "gpu"
+            template_json["systems"]["local_system"]["config"]["accelerators"][0]["execution_providers"] = [
+                "DMLExecutionProvider"
             ]
     if args.optimum_optimization or (args.finetune_method and not args.model_type):
         # set evaluator as None:
