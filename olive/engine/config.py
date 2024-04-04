@@ -14,11 +14,11 @@ from olive.strategy.search_strategy import SearchStrategyConfig
 from olive.systems.system_config import SystemConfig
 
 # pass search-point was pruned due to failed run
-FAILED_CONFIG = "failed-config"
+FAILED_MODEL = "failed-model"
 # pass search-point was pruned due to invalid config
-INVALID_CONFIG = "invalid-config"
+INVALID_MODEL = "invalid-model"
 # list of all pruned configs
-PRUNED_CONFIGS = (FAILED_CONFIG, INVALID_CONFIG)
+PRUNED_MODELS = (FAILED_MODEL, INVALID_MODEL)
 
 
 class EngineConfig(ConfigBase, extra=Extra.forbid):
@@ -26,6 +26,7 @@ class EngineConfig(ConfigBase, extra=Extra.forbid):
     host: SystemConfig = None
     target: SystemConfig = None
     evaluator: OliveEvaluatorConfig = None
+    enable_fast_mode: bool = False
     azureml_client_config: Optional[AzureMLClientConfig] = None
     packaging_config: PackagingConfig = None
     cache_dir: Union[Path, str] = ".olive-cache"

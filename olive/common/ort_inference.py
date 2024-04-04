@@ -6,12 +6,14 @@
 # Import them lazily since onnxruntime is not a required dependency for Olive.
 # Import in TYPE_CHECKING block for type hinting is fine.
 import collections
+import copy
 import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
+import onnx
 
 if TYPE_CHECKING:
     from onnxruntime import InferenceSession, IOBinding
@@ -28,14 +30,14 @@ class OrtSessionFallbackError(Exception):
 # For regular ONNX models, the recommended way to specify the device is to set the environment variable
 # `CUDA_VISIBLE_DEVICES` before runnning a workflow.
 def get_ort_inference_session(
-    model_path: Union[Path, str],
+    model: Union[Path, str, onnx.ModelProto],
     inference_settings: Dict[str, Any],
     use_ort_extensions: bool = False,
     device_id: Optional[int] = None,
 ):
     """Get an ONNXRuntime inference session.
 
-    :param model_path: Path to the ONNX model file.
+    :param model: Path to the ONNX model file or ModelProto.
     :param inference_settings: Inference settings for the session.
         session_options: dict, optional. Session options for the session.
         execution_provider: list. List of execution providers to use. Can be a list of provider names or a list of
@@ -99,8 +101,33 @@ def get_ort_inference_session(
         sess_options.enable_mem_pattern = False
 
     # create session
+    model_infer = None
+    if isinstance(model, onnx.ModelProto):
+        import onnxruntime as ort
+        from packaging import version
+
+        if version.parse(ort.__version__) < version.parse("1.18.0"):
+            raise ValueError("onnxruntime>=1.18.0 is required for loading ModelProto directly "
+                             "for onnxruntime inference session.")
+    
+        from onnxruntime.transformers.onnx_utils import extract_raw_data_from_model, has_external_data
+
+        if has_external_data(model):
+            raise ValueError(
+                "ModelProto has external data not loaded into memory, ORT cannot create session. "
+                "Please load external data before calling this function. "
+                "See https://onnx.ai/onnx/repo-docs/ExternalData.html for more information."
+            )
+        # create a new model
+        model_infer = copy.deepcopy(model)
+        external_names, external_values = extract_raw_data_from_model(model_infer)
+        if external_names and external_values:
+            sess_options.add_external_initializers(list(external_names), list(external_values))
+
+    model_infer = model_infer.SerializeToString() if model_infer else model
+
     session = ort.InferenceSession(
-        str(model_path), sess_options=sess_options, providers=providers, provider_options=provider_options
+        model_infer, sess_options=sess_options, providers=providers, provider_options=provider_options
     )
     check_ort_fallback(session, providers)
     # set tuning results for tunable operators (currently only for ROCM EP)

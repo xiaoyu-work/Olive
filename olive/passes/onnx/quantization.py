@@ -14,6 +14,7 @@ from packaging import version
 
 from olive.cache import get_local_path_from_root
 from olive.common.config_utils import validate_config
+from olive.common.onnx_utils import model_proto_to_file
 from olive.common.pydantic_v1 import validator
 from olive.common.utils import hash_string
 from olive.data.config import DataConfig
@@ -22,7 +23,7 @@ from olive.hardware.accelerator import AcceleratorSpec
 from olive.model import ONNXModelHandler
 from olive.model.utils import resolve_onnx_path
 from olive.passes import Pass
-from olive.passes.onnx.common import get_external_data_config, model_proto_to_file, model_proto_to_olive_model
+from olive.passes.onnx.common import get_external_data_config, model_proto_to_olive_model
 from olive.passes.pass_config import ParamCategory, PassConfigParam
 from olive.resource_path import OLIVE_RESOURCE_ANNOTATIONS, LocalFile
 from olive.strategy.search_parameter import Boolean, Categorical, Conditional, ConditionalDefault
@@ -337,7 +338,12 @@ class OnnxQuantization(Pass):
         return True
 
     def _run_for_config(
-        self, model: ONNXModelHandler, data_root: str, config: Dict[str, Any], output_model_path: str
+        self,
+        model: ONNXModelHandler,
+        data_root: str,
+        config: Dict[str, Any],
+        output_model_path: str,
+        enable_fast_mode: bool = False,
     ) -> ONNXModelHandler:
         from onnxruntime import __version__ as OrtVersion
         from onnxruntime.quantization import QuantFormat, QuantType, quantize_dynamic, quantize_static
@@ -357,7 +363,8 @@ class OnnxQuantization(Pass):
             if config["prepare_qnn_config"] and version.parse(OrtVersion) < version.parse("1.17.0"):
                 raise OlivePassError("prepare_qnn_config is only supported by onnxruntime>=1.17.0")
 
-        output_model_path = resolve_onnx_path(output_model_path, Path(model.model_path).name)
+        if model.model_path:
+            output_model_path = resolve_onnx_path(output_model_path, Path(model.model_path).name)
 
         # extra config
         extra_options = deepcopy(config["extra_options"]) if config["extra_options"] else {}
@@ -377,7 +384,9 @@ class OnnxQuantization(Pass):
         # we hash the entire path of the input model to ensure we are not accidentally using a preprocessed model
         # from a different model
         preprocessed_temp_model_path = (
-            Path(self.tmp_dir.name) / f"{hash_string(str(Path(model.model_path).resolve()))}" / "preprocessed.onnx"
+            (Path(self.tmp_dir.name) / f"{hash_string(str(Path(model.model_path).resolve()))}" / "preprocessed.onnx")
+            if model.model_path
+            else Path(self.tmp_dir.name) / "preprocessed.onnx"
         )
         preprocessed_temp_model_path.parent.mkdir(exist_ok=True, parents=True)
         if run_config["quant_preprocess"]:
@@ -387,7 +396,7 @@ class OnnxQuantization(Pass):
                 model = self._quant_preprocess(model, preprocessed_temp_model_path)
             else:
                 logger.info("Already processed model for quantization, skipping preprocessing")
-                model = ONNXModelHandler(LocalFile({"path": preprocessed_temp_model_path}))
+                model = ONNXModelHandler(model_path=LocalFile({"path": preprocessed_temp_model_path}))
 
         # keys not needed for quantization
         to_delete = [
@@ -441,6 +450,8 @@ class OnnxQuantization(Pass):
         new_tmp_dir = tempfile.TemporaryDirectory(prefix="olive_tmp")
         tmp_model_path = str(Path(new_tmp_dir.name) / Path(output_model_path).name)
 
+        model_input = model.model if model.model else model.model_path
+
         if is_static:
             # get the dataloader
             dataloader = get_calibration_dataloader(data_root, self._user_module_loader, config)
@@ -450,7 +461,7 @@ class OnnxQuantization(Pass):
                 from onnxruntime.quantization.execution_providers.qnn import get_qnn_qdq_config
 
                 qnn_config = get_qnn_qdq_config(
-                    model_input=model.model_path,
+                    model_input=model_input,
                     calibration_data_reader=dataloader,
                     calibrate_method=run_config["calibrate_method"],
                     activation_type=run_config["activation_type"],
@@ -468,7 +479,7 @@ class OnnxQuantization(Pass):
                     del run_config[key]
             try:
                 quantize_static(
-                    model_input=model.model_path,
+                    model_input=model_input,
                     model_output=tmp_model_path,
                     calibration_data_reader=dataloader,
                     use_external_data_format=True,
@@ -479,7 +490,7 @@ class OnnxQuantization(Pass):
         else:
             try:
                 quantize_dynamic(
-                    model_input=model.model_path,
+                    model_input=model_input,
                     model_output=tmp_model_path,
                     use_external_data_format=True,
                     **run_config,
@@ -495,14 +506,15 @@ class OnnxQuantization(Pass):
         new_tmp_dir.cleanup()
 
         # save the model to the output path and return the model
-        return model_proto_to_olive_model(onnx_model, output_model_path, config)
+        return model_proto_to_olive_model(onnx_model, output_model_path, config, enable_fast_mode=enable_fast_mode)
 
     def _quant_preprocess(self, model: ONNXModelHandler, output_model_path: Union[str, Path]) -> ONNXModelHandler:
         from onnxruntime.quantization.preprocess import quant_pre_process
 
         try:
+            input_model = model.model if model.model else model.model_path
             quant_pre_process(
-                input_model_path=model.model_path,
+                input_model=input_model,
                 output_model_path=str(output_model_path),
                 auto_merge=True,
                 save_as_external_data=True,
@@ -518,7 +530,7 @@ class OnnxQuantization(Pass):
                 "Failed to run quantization preprocessing with error of %s. Using original model.", e, exc_info=True
             )
             # save original model to output path
-            onnx_model = onnx.load(model.model_path)
+            onnx_model = model.model if model.model else onnx.load(model.model_path)
             model_proto_to_file(
                 onnx_model,
                 output_model_path,
@@ -526,7 +538,7 @@ class OnnxQuantization(Pass):
             )
 
         # since this is only used internally, we will just treat it as a model file
-        return ONNXModelHandler(LocalFile({"path": output_model_path}))
+        return ONNXModelHandler(model_path=LocalFile({"path": output_model_path}))
 
 
 class OnnxDynamicQuantization(OnnxQuantization):
@@ -683,7 +695,12 @@ class OnnxMatMul4Quantizer(Pass):
         }
 
     def _run_for_config(
-        self, model: ONNXModelHandler, data_root: str, config: Dict[str, Any], output_model_path: str
+        self,
+        model: ONNXModelHandler,
+        data_root: str,
+        config: Dict[str, Any],
+        output_model_path: str,
+        enable_fast_mode: bool = False,
     ) -> ONNXModelHandler:
         from onnxruntime import __version__ as OrtVersion
 
@@ -692,7 +709,8 @@ class OnnxMatMul4Quantizer(Pass):
 
         from onnxruntime.quantization.matmul_4bits_quantizer import MatMul4BitsQuantizer
 
-        output_model_path = resolve_onnx_path(output_model_path, Path(model.model_path).name)
+        if model.model_path:
+            output_model_path = resolve_onnx_path(output_model_path, Path(model.model_path).name)
 
         weight_only_quant_config_class = None
         weight_only_quant_config = None
@@ -750,7 +768,9 @@ class OnnxMatMul4Quantizer(Pass):
         # quant.model._check_init is not needed since it's only meant for float8 quantization
 
         # save the model to the output path and return the model
-        return model_proto_to_olive_model(quant.model.model, output_model_path, config)
+        return model_proto_to_olive_model(
+            quant.model.model, output_model_path, config, enable_fast_mode=enable_fast_mode
+        )
 
 
 def _validate_accuracy_level(v, values, field):

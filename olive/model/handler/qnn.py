@@ -80,6 +80,9 @@ class QNNModelHandler(OliveModelHandler):
     def load_model(self, rank: int = None):
         raise NotImplementedError("QNNModelHandler does not support load_model")
 
+    def save_model_to_path(self, save_path: Union[str, Path]):
+        raise NotImplementedError
+
     def prepare_session(
         self,
         inference_settings: Union[Dict[str, Any], None] = None,

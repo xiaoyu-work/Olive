@@ -51,6 +51,7 @@ class PyTorchModelHandler(OliveModelHandler, HfConfigMixin, DummyInputsMixin):  
         self,
         model_path: OLIVE_RESOURCE_ANNOTATIONS = None,
         model_file_format: ModelFileFormat = ModelFileFormat.PYTORCH_ENTIRE_MODEL,
+        model: Optional[torch.nn.Module] = None,
         model_loader: Union[str, Callable] = None,
         model_script: Union[str, Path] = None,
         script_dir: Union[str, Path] = None,
@@ -71,10 +72,10 @@ class PyTorchModelHandler(OliveModelHandler, HfConfigMixin, DummyInputsMixin):  
             )
 
         self.model_loader = model_loader
-        self.model = None
         super().__init__(
             framework=Framework.PYTORCH,
             model_file_format=model_file_format,
+            model=model,
             model_path=model_path,
             model_attributes=model_attributes,
         )
@@ -154,6 +155,9 @@ class PyTorchModelHandler(OliveModelHandler, HfConfigMixin, DummyInputsMixin):  
         self.model = model
 
         return model
+
+    def save_model_to_path(self, save_path: Union[str, Path]):
+        raise NotImplementedError
 
     def get_component_model(self, component: HfComponent, rank: Optional[int] = None) -> "PyTorchModelHandler":
         if component.component_func is None:

@@ -9,6 +9,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Tuple, Union
 import onnx
 from onnx import GraphProto, ModelProto
 
+from olive.common.onnx_utils import model_proto_to_file
 from olive.common.ort_inference import OrtSessionFallbackError, get_ort_inference_session
 from olive.constants import Framework, ModelFileFormat
 from olive.exception import OliveEvaluationError
@@ -36,20 +37,24 @@ class ONNXModelHandler(OliveModelHandler, OnnxEpValidateMixin, OnnxGraphMixin): 
 
     def __init__(
         self,
+        model: Optional[ModelProto] = None,
         model_path: OLIVE_RESOURCE_ANNOTATIONS = None,
         onnx_file_name: Optional[str] = None,
         inference_settings: Optional[dict] = None,
         use_ort_extensions: bool = False,
         model_attributes: Optional[Dict[str, Any]] = None,
+        external_data_config: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             framework=Framework.ONNX,
             model_file_format=ModelFileFormat.ONNX,
+            model=model,
             model_path=model_path,
             model_attributes=model_attributes,
         )
         self.inference_settings = inference_settings
         self.use_ort_extensions = use_ort_extensions
+        self.external_data_config = external_data_config
         self.onnx_file_name = onnx_file_name
 
         self.io_config = None
@@ -65,7 +70,16 @@ class ONNXModelHandler(OliveModelHandler, OnnxEpValidateMixin, OnnxGraphMixin): 
         return get_onnx_file_path(model_path, self.onnx_file_name) if model_path else None
 
     def load_model(self, rank: int = None) -> ModelProto:
-        return onnx.load(self.model_path)
+        if self.model is not None:
+            return self.model
+
+        self.model = onnx.load(self.model_path)
+        return self.model
+
+    def save_model_to_path(self, save_path: Union[str, Path]):
+        if self.model is None:
+            raise ValueError("Model is not loaded yet. Cannot save model to file.")
+        model_proto_to_file(self.model, save_path, **self.external_data_config)
 
     def prepare_session(
         self,
@@ -84,7 +98,8 @@ class ONNXModelHandler(OliveModelHandler, OnnxEpValidateMixin, OnnxGraphMixin): 
         device_id = rank if device == Device.GPU else None
 
         try:
-            return get_ort_inference_session(self.model_path, inference_settings, self.use_ort_extensions, device_id)
+            model = self.model if self.model is not None else self.model_path
+            return get_ort_inference_session(model, inference_settings, self.use_ort_extensions, device_id)
         except OrtSessionFallbackError as e:
             raise OliveEvaluationError(e) from e
 
@@ -185,6 +200,13 @@ class DistributedOnnxModelHandler(OliveModelHandler, OnnxEpValidateMixin):
             use_ort_extensions=self.use_ort_extensions,
             model_attributes=self.model_attributes,
         )
+
+    # def save_model_to_path(self, save_path: str):
+    #     if self.model is None:
+    #         raise ValueError("Model is not loaded yet. Cannot save model to file.")
+    #     return model_proto_to_olive_model(
+    #         self.model, save_path, external_data_config=self.external_data_config, check_model=True
+    #     )
 
     def prepare_session(
         self,

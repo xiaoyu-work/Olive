@@ -92,14 +92,14 @@
             "config": {
                 "lora_dropout": 0.1,
                 "train_data_config": "tiny_codes_train",
-                "eval_dataset_size": 1024,
+                "eval_dataset_size": 8,
                 "training_args": {
-                    "per_device_train_batch_size": 16,
-                    "per_device_eval_batch_size": 16,
+                    "per_device_train_batch_size": 2,
+                    "per_device_eval_batch_size": 2,
                     "gradient_accumulation_steps": 1,
-                    "max_steps": 1500,
-                    "logging_steps": 100,
-                    "save_steps": 100,
+                    "max_steps": 50,
+                    "logging_steps": 2,
+                    "save_steps": 2,
                     "evaluation_strategy": "steps",
                     "adam_beta2": 0.999,
                     "max_grad_norm": 0.3,
@@ -144,6 +144,8 @@
         "host": "local_system",
         "target": "local_system",
         "cache_dir": "cache",
-        "output_dir" : "models/qlora"
+        "output_dir" : "models/qlora",
+        "clean_cache": true,
+        "enable_fast_mode": false
     }
 }

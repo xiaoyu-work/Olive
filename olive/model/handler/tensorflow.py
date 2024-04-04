@@ -2,6 +2,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from olive.constants import Framework, ModelFileFormat
@@ -27,6 +28,9 @@ class TensorFlowModelHandler(OliveModelHandler):
         )
 
     def load_model(self, rank: int = None):
+        raise NotImplementedError
+
+    def save_model_to_path(self, save_path: Union[str, Path]):
         raise NotImplementedError
 
     def prepare_session(

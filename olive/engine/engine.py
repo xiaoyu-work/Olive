@@ -14,13 +14,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 import olive.cache as cache_utils
 from olive.common.config_utils import ConfigBase, validate_config
 from olive.common.utils import hash_dict
-from olive.engine.config import FAILED_CONFIG, INVALID_CONFIG, PRUNED_CONFIGS, EngineConfig
+from olive.engine.config import FAILED_MODEL, INVALID_MODEL, PRUNED_MODELS, EngineConfig
 from olive.engine.footprint import Footprint, FootprintNodeMetric
 from olive.engine.packaging.packaging_generator import generate_output_artifacts
 from olive.evaluator.metric import Metric, MetricResult, joint_metric_key
 from olive.exception import EXCEPTIONS_TO_RAISE, OlivePassError
 from olive.hardware import AcceleratorSpec
 from olive.model import ModelConfig
+from olive.model.handler.base import OliveModelHandler
 from olive.strategy.search_strategy import SearchStrategy
 from olive.systems.common import SystemType
 from olive.systems.olive_system import OliveSystem
@@ -100,6 +101,7 @@ class Engine:
 
         self.footprints = defaultdict(Footprint)
         self.azureml_client_config = self._config.azureml_client_config
+        self.enable_fast_mode = self._config.enable_fast_mode
         self._initialized = False
 
     def initialize(self):
@@ -328,7 +330,11 @@ class Engine:
                 )
             elif evaluate_input_model:
                 results = self._evaluate_model(
-                    input_model_config, input_model_id, data_root, self.evaluator_config, accelerator_spec
+                    input_model_config.create_model(),
+                    input_model_id,
+                    data_root,
+                    self.evaluator_config,
+                    accelerator_spec,
                 )
                 logger.info("Input model evaluation results: %s", results)
                 result_name = f"{prefix_output_name}_input_model_metrics"
@@ -418,7 +424,7 @@ class Engine:
         input_model_id: str,
         data_root: str,
         accelerator_spec: "AcceleratorSpec",
-        output_dir: str = None,
+        output_dir: Path = None,
         output_name: str = None,
     ):
         """Run all the registered Olive pass flows in no-search mode."""
@@ -435,7 +441,7 @@ class Engine:
             # run all the passes in the pass flow
             logger.debug("Running %s with no search ...", pass_flow)
             should_prune, signal, model_ids = self._run_passes(
-                passes_to_run, input_model_config, input_model_id, data_root, accelerator_spec
+                passes_to_run, input_model_config, input_model_id, data_root, accelerator_spec, output_dir
             )
 
             if should_prune:
@@ -450,7 +456,7 @@ class Engine:
             pass_output_names = [f"{name}_{accelerator_spec}" if name else None for name in pass_output_names]
 
             # output dir with pass flow
-            output_dir_with_pf = Path(output_dir) / "-".join(pass_flow)
+            output_dir_with_pf = output_dir / "-".join(pass_flow)
 
             if not pass_output_names[-1] or output_name:
                 # if the last pass does not have output name, use the prefix output name
@@ -493,7 +499,7 @@ class Engine:
         input_model_id: str,
         data_root: str,
         accelerator_spec: "AcceleratorSpec",
-        output_dir: str = None,
+        output_dir: Path = None,
         output_name: str = None,
     ):
         """Run all the registered Olive passes in search model where search strategy is not None."""
@@ -538,7 +544,7 @@ class Engine:
 
             # run all the passes in the step
             should_prune, signal, model_ids = self._run_passes(
-                next_step["passes"], model_config, model_id, data_root, accelerator_spec
+                next_step["passes"], model_config, model_id, data_root, accelerator_spec, output_dir, output_dir
             )
 
             # record feedback signal
@@ -706,7 +712,7 @@ class Engine:
     def _cache_model(self, model: Union[ModelConfig, str], model_id: str, check_object: bool = True):
         """Cache the model in the cache directory."""
         # TODO(trajep): move model/pass run/evaluation cache into footprints
-        if model == FAILED_CONFIG:
+        if model == FAILED_MODEL:
             model_json = {}
         else:
             model_json = model.to_json(check_object=check_object)
@@ -729,11 +735,11 @@ class Engine:
             return None
 
         if model_json == {}:
-            return FAILED_CONFIG
+            return FAILED_MODEL
 
         return ModelConfig.from_json(model_json)
 
-    def _prepare_non_local_model(self, model_config: ModelConfig) -> ModelConfig:
+    def _prepare_non_local_model(self, model_config: ModelConfig) -> OliveModelHandler:
         """Prepare models with non-local model path for local run by downloading the model resources to cache."""
         # TODO(myguo): maybe we can move this method into OliveSystem?
         resource_paths = model_config.get_resource_paths()
@@ -745,7 +751,7 @@ class Engine:
                 # set local resource path
                 model_config.config[resource_name] = downloaded_resource_path
 
-        return model_config
+        return model_config.create_model()
 
     def _init_input_model(self, input_model_config: ModelConfig):
         """Initialize the input model."""
@@ -822,6 +828,7 @@ class Engine:
         model_id: str,
         data_root: str,
         accelerator_spec: "AcceleratorSpec",
+        output_dir: Path = None,
     ):
         """Run all the passes in the order they were registered.
 
@@ -829,13 +836,23 @@ class Engine:
         """
         should_prune = False
         # run all the passes in the step
+        model: OliveModelHandler = model_config.create_model()
         model_ids = []
         pass_id = None
+        enable_fast_mode = self.enable_fast_mode
+        print(f"fast mode here is {enable_fast_mode}")
         for pass_id, pass_search_point in passes:
-            model_config, model_id = self._run_pass(
-                pass_id, pass_search_point, model_config, model_id, data_root, accelerator_spec
+            print(f"pass id is {pass_id}")
+            print(f"input model is {model}")
+            print(f"input model model is {type(model.model)}")
+            print(f"input model path is {model.model_path}")
+            model, model_id = self._run_pass(
+                pass_id, pass_search_point, model, model_id, data_root, accelerator_spec, enable_fast_mode
             )
-            if model_config in PRUNED_CONFIGS:
+            print(f"out model is {model}")
+            print(f"out model model is {type(model.model)}")
+            print(f"out model path is {model.model_path}")
+            if model in PRUNED_MODELS:
                 should_prune = True
                 logger.debug("Pruned for pass %s", pass_id)
                 break
@@ -849,11 +866,26 @@ class Engine:
                 signal = None
             else:
                 logger.info("Run model evaluation for the final model...")
-                signal = self._evaluate_model(model_config, model_id, data_root, evaluator_config, accelerator_spec)
+                signal = self._evaluate_model(model, model_id, data_root, evaluator_config, accelerator_spec)
             logger.debug("Signal: %s", signal)
         else:
             signal = None
             logger.warning("Skipping evaluation as model was pruned")
+
+        # if enable_fast_mode, save the final model
+        # if the model is pruned, do not save the model
+        # if the model is pytorch model, do not save the model
+        if enable_fast_mode and model not in PRUNED_MODELS and model.framework != "pytorch":
+            time_before = time.time()
+            print(f"time before save model is {time_before}")
+            print(f"default output dir is {output_dir}")
+            output_dir = output_dir or "olive_output"
+            print(f"current output dir is {output_dir}")
+            model.save_model_to_path(output_dir)
+            time_after = time.time()
+            print(f"time after save model is {time_after}")
+            print(f"save model time is {time_after - time_before}")
+            self._cache_model(model, model_id)
 
         return should_prune, signal, model_ids
 
@@ -861,10 +893,11 @@ class Engine:
         self,
         pass_id: str,
         pass_search_point: Dict[str, Any],
-        input_model_config: ModelConfig,
+        input_model: OliveModelHandler,
         input_model_id: str,
         data_root: str,
         accelerator_spec: "AcceleratorSpec",
+        enable_fast_mode: bool = False,
     ):
         """Run a pass on the input model."""
         # pass
@@ -877,35 +910,39 @@ class Engine:
         # check whether the config is valid
         if not p.validate_search_point(pass_search_point, accelerator_spec, with_fixed_value=True):
             logger.warning("Invalid search point, prune")
-            output_model_config = INVALID_CONFIG
+            output_model = INVALID_MODEL
             # no need to record in footprint since there was no run and thus no valid/failed model
             # invalid configs are also not cached since the same config can be valid for other accelerator specs
             # a pass can be accelerator agnostic but still have accelerator specific invalid configs
             # this helps reusing cached models for different accelerator specs
-            return output_model_config, None
+            return output_model, None
 
-        # load run from cache if it exists
-        run_accel = None if p.is_accelerator_agnostic(accelerator_spec) else accelerator_spec
-        run_cache = self._load_run(input_model_id, pass_name, pass_config, run_accel)
-        output_model_id = run_cache.get("output_model_id", None)
-        if output_model_id is not None:
-            logger.debug("Loading model from cache ...")
-            output_model_config = self._load_model(output_model_id)
-            if output_model_config is not None:
-                # footprint model and run
-                self.footprints[accelerator_spec].record(
-                    model_id=output_model_id,
-                    model_config=(
-                        output_model_config.to_json() if output_model_config != FAILED_CONFIG else {"is_pruned": True}
-                    ),
-                    parent_model_id=input_model_id,
-                    from_pass=pass_name,
-                    pass_run_config=pass_config,
-                    start_time=run_cache.get("run_start_time", 0),
-                    end_time=run_cache.get("run_end_time", 0),
-                )
-                logger.info("Loaded model from cache: %s from %s", output_model_id, self._run_cache_path)
-                return output_model_config, output_model_id
+        if not enable_fast_mode:
+            # load run from cache if it exists
+            run_accel = None if p.is_accelerator_agnostic(accelerator_spec) else accelerator_spec
+            run_cache = self._load_run(input_model_id, pass_name, pass_config, run_accel)
+            output_model_id = run_cache.get("output_model_id", None)
+
+            if output_model_id is not None:
+                logger.debug("Loading model from cache ...")
+                output_model_config = self._load_model(output_model_id)
+                if output_model_config is not None:
+                    # footprint model and run
+                    self.footprints[accelerator_spec].record(
+                        model_id=output_model_id,
+                        model_config=(
+                            output_model_config.to_json()
+                            if output_model_config != FAILED_MODEL
+                            else {"is_pruned": True}
+                        ),
+                        parent_model_id=input_model_id,
+                        from_pass=pass_name,
+                        pass_run_config=pass_config,
+                        start_time=run_cache.get("run_start_time", 0),
+                        end_time=run_cache.get("run_end_time", 0),
+                    )
+                    logger.info("Loaded model from cache: %s from %s", output_model_id, self._run_cache_path)
+                    return output_model_config.create_model(), output_model_id
 
         # new model id
         input_model_number = input_model_id.split("_")[0]
@@ -927,8 +964,9 @@ class Engine:
 
         # run pass
         host = self.host_for_pass(pass_id)
-        if host.system_type != SystemType.AzureML:
-            input_model_config = self._prepare_non_local_model(input_model_config)
+
+        if host.system_type != SystemType.AzureML and input_model.model is None:
+            input_model = self._prepare_non_local_model(ModelConfig.from_json(input_model.to_json()))
 
         run_start_time = datetime.now().timestamp()
         try:
@@ -940,15 +978,20 @@ class Engine:
                 else:
                     host = self.target
 
-            output_model_config = host.run_pass(p, input_model_config, data_root, output_model_path, pass_search_point)
+            print(f"00input model is {input_model}")
+            print(f"00input model model is {type(input_model.model)}")
+            print(f"00input model path is {input_model.model_path}")
+            output_model = host.run_pass(
+                p, input_model, data_root, output_model_path, pass_search_point, enable_fast_mode=enable_fast_mode
+            )
         except OlivePassError:
             logger.exception("Pass run_pass failed")
-            output_model_config = FAILED_CONFIG
+            output_model = FAILED_MODEL
         except EXCEPTIONS_TO_RAISE:
             # Don't catch these errors since most of time, it is caused by the user errors and need not retry.
             raise
         except Exception:
-            output_model_config = FAILED_CONFIG
+            output_model = FAILED_MODEL
             # TODO(jambayk): from the time being, we need to catch all exceptions to make the
             #      search process robust. We need rethrow the exception only when
             #      it is not pass specific. For example, for olive bugs and user errors
@@ -959,25 +1002,31 @@ class Engine:
         run_end_time = datetime.now().timestamp()
         logger.info("Pass %s:%s finished in %f seconds", pass_id, pass_name, run_end_time - run_start_time)
 
-        # cache model
-        self._cache_model(output_model_config, output_model_id)
+        if not enable_fast_mode:
+            output_model_config = ModelConfig.from_json(output_model.to_json())
+            # cache model
+            self._cache_model(output_model_config, output_model_id)
 
-        # cache run
-        self._cache_run(
-            pass_name, pass_config, input_model_id, output_model_id, run_accel, run_start_time, run_end_time
-        )
+            # cache run
+            self._cache_run(
+                pass_name, pass_config, input_model_id, output_model_id, run_accel, run_start_time, run_end_time
+            )
 
         # footprint model and run
         self.footprints[accelerator_spec].record(
             model_id=output_model_id,
-            model_config=output_model_config.to_json() if output_model_config != FAILED_CONFIG else {"is_pruned": True},
+            model_config=(
+                ModelConfig.from_json(output_model.to_json()).to_json()
+                if output_model != FAILED_MODEL
+                else {"is_pruned": True}
+            ),
             parent_model_id=input_model_id,
             from_pass=pass_name,
             pass_run_config=pass_config,
             start_time=run_start_time,
             end_time=run_end_time,
         )
-        return output_model_config, output_model_id
+        return output_model, output_model_id
 
     def get_evaluation_json_path(self, model_id: str):
         """Get the path to the evaluation json."""
@@ -1014,7 +1063,7 @@ class Engine:
 
     def _evaluate_model(
         self,
-        model_config: ModelConfig,
+        model: OliveModelHandler,
         model_id: str,
         data_root: str,
         evaluator_config: "OliveEvaluatorConfig",
@@ -1045,9 +1094,12 @@ class Engine:
 
         # evaluate model
         metrics = evaluator_config.metrics if evaluator_config else []
-        if self.target.system_type != SystemType.AzureML:
-            model_config = self._prepare_non_local_model(model_config)
-        signal = self.target.evaluate_model(model_config, data_root, metrics, accelerator_spec)
+
+        if self.target.system_type != SystemType.AzureML and model.model is None:
+            model_config = ModelConfig.from_json(model.to_json())
+            model = self._prepare_non_local_model(model_config)
+
+        signal = self.target.evaluate_model(model, data_root, metrics, accelerator_spec)
 
         # cache evaluation
         self._cache_evaluation(model_id_with_accelerator, signal)
