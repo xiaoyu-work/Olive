@@ -63,8 +63,11 @@ class ResourceMixin:
 
     def _add_resources(self, resources: Dict[str, OLIVE_RESOURCE_ANNOTATIONS]):
         for resource_name, resource_path in resources.items():
+            print(f"resource_name is {resource_name}, {resource_path}")
+            print(f"resource path type is {type(resource_path)}")
             if resource_path is not None:
                 resolved_resource_path = create_resource_path(resource_path)
+                print(f"resolved resource path is {resolved_resource_path}")
                 assert (
                     resolved_resource_path.is_local_resource_or_string_name()
                 ), f"{resource_name} must be local path or string name."

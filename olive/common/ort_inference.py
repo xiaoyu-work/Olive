@@ -103,10 +103,10 @@ def get_ort_inference_session(
     # create session
     model_infer = None
     if isinstance(model, onnx.ModelProto):
-        import onnxruntime as ort
+        from onnxruntime import __version__ as OrtVersion
         from packaging import version
 
-        if version.parse(ort.__version__) < version.parse("1.18.0"):
+        if version.parse(OrtVersion) < version.parse("1.18.0"):
             raise ValueError("onnxruntime>=1.18.0 is required for loading ModelProto directly "
                              "for onnxruntime inference session.")
     

@@ -514,7 +514,7 @@ class OnnxQuantization(Pass):
         try:
             input_model = model.model if model.model else model.model_path
             quant_pre_process(
-                input_model=input_model,
+                input_model_path=input_model,
                 output_model_path=str(output_model_path),
                 auto_merge=True,
                 save_as_external_data=True,

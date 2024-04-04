@@ -1003,7 +1003,7 @@ class Engine:
         logger.info("Pass %s:%s finished in %f seconds", pass_id, pass_name, run_end_time - run_start_time)
 
         if not enable_fast_mode:
-            output_model_config = ModelConfig.from_json(output_model.to_json())
+            output_model_config = output_model if isinstance(output_model, str) else ModelConfig.from_json(output_model.to_json())
             # cache model
             self._cache_model(output_model_config, output_model_id)
 
@@ -1099,6 +1099,7 @@ class Engine:
             model_config = ModelConfig.from_json(model.to_json())
             model = self._prepare_non_local_model(model_config)
 
+        print(f"here the model.model is {model.model}")
         signal = self.target.evaluate_model(model, data_root, metrics, accelerator_spec)
 
         # cache evaluation
