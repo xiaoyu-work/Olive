@@ -4,6 +4,7 @@
 # --------------------------------------------------------------------------
 import logging
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from olive.common.config_utils import serialize_to_json, validate_config
