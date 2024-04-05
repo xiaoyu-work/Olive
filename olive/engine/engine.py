@@ -1102,7 +1102,6 @@ class Engine:
             model_config = ModelConfig.from_json(model.to_json())
             model = self._prepare_non_local_model(model_config).create_model()
 
-        print(f"here the model.model is {model.model}")
         signal = self.target.evaluate_model(model, data_root, metrics, accelerator_spec)
 
         # cache evaluation
