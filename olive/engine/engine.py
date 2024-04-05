@@ -321,7 +321,10 @@ class Engine:
         input_model_id = self._init_input_model(input_model_config)
         self.footprints[accelerator_spec].record(model_id=input_model_id)
         prefix_output_name = Engine._get_prefix_output_name(output_name, accelerator_spec)
-
+        
+        if self.target.system_type != SystemType.AzureML:
+            input_model_config = self._prepare_non_local_model(input_model_config)
+        
         try:
             if evaluate_input_model and not self.evaluator_config:
                 logger.debug(
@@ -739,7 +742,7 @@ class Engine:
 
         return ModelConfig.from_json(model_json)
 
-    def _prepare_non_local_model(self, model_config: ModelConfig) -> OliveModelHandler:
+    def _prepare_non_local_model(self, model_config: ModelConfig) -> ModelConfig:
         """Prepare models with non-local model path for local run by downloading the model resources to cache."""
         # TODO(myguo): maybe we can move this method into OliveSystem?
         resource_paths = model_config.get_resource_paths()
@@ -751,7 +754,7 @@ class Engine:
                 # set local resource path
                 model_config.config[resource_name] = downloaded_resource_path
 
-        return model_config.create_model()
+        return model_config
 
     def _init_input_model(self, input_model_config: ModelConfig):
         """Initialize the input model."""
@@ -966,7 +969,7 @@ class Engine:
         host = self.host_for_pass(pass_id)
 
         if host.system_type != SystemType.AzureML and input_model.model is None:
-            input_model = self._prepare_non_local_model(ModelConfig.from_json(input_model.to_json()))
+            input_model = self._prepare_non_local_model(ModelConfig.from_json(input_model.to_json())).create_model()
 
         run_start_time = datetime.now().timestamp()
         try:
@@ -1097,7 +1100,7 @@ class Engine:
 
         if self.target.system_type != SystemType.AzureML and model.model is None:
             model_config = ModelConfig.from_json(model.to_json())
-            model = self._prepare_non_local_model(model_config)
+            model = self._prepare_non_local_model(model_config).create_model()
 
         print(f"here the model.model is {model.model}")
         signal = self.target.evaluate_model(model, data_root, metrics, accelerator_spec)
