@@ -753,8 +753,7 @@ class Engine:
         if model_config:
             resource_paths = model_config.get_resource_paths()
         else:
-            print(f"model handler resource paths are {model_handler.resource_paths}")
-            resource_paths = {k: create_resource_path(v) for k, v in model_handler.resource_paths}
+            resource_paths = {k: create_resource_path(v) for k, v in model_handler.resource_paths.items()}
         for resource_name, resource_path in resource_paths.items():
             if not resource_path or resource_path.is_local_resource_or_string_name():
                 continue
