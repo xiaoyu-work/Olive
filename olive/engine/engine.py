@@ -756,6 +756,16 @@ class Engine:
 
         return model_config
 
+    def _prepare_non_local_model(self, model: OliveModelHandler) -> None:
+        resource_paths = model.get_resource_paths()
+        for resource_name, resource_path in resource_paths.items():
+            if not resource_path or resource_path.is_local_resource_or_string_name():
+                continue
+            downloaded_resource_path = cache_utils.download_resource(resource_path, self._config.cache_dir)
+            if downloaded_resource_path:
+                model.set_resource(resource_name, downloaded_resource_path)
+        
+
     def _init_input_model(self, input_model_config: ModelConfig):
         """Initialize the input model."""
         model_hash = hash_dict(input_model_config.to_json())
@@ -969,7 +979,7 @@ class Engine:
         host = self.host_for_pass(pass_id)
 
         if host.system_type != SystemType.AzureML and input_model.model is None:
-            input_model = self._prepare_non_local_model(ModelConfig.from_json(input_model.to_json())).create_model()
+            self._prepare_non_local_model(input_model)
 
         run_start_time = datetime.now().timestamp()
         try:
@@ -1099,8 +1109,7 @@ class Engine:
         metrics = evaluator_config.metrics if evaluator_config else []
 
         if self.target.system_type != SystemType.AzureML and model.model is None:
-            model_config = ModelConfig.from_json(model.to_json())
-            model = self._prepare_non_local_model(model_config).create_model()
+            self._prepare_non_local_model(model)
 
         signal = self.target.evaluate_model(model, data_root, metrics, accelerator_spec)
 

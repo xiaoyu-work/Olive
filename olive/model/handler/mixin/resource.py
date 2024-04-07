@@ -60,7 +60,16 @@ class ResourceMixin:
         :return: all resource keys.
         """
         return cls.resource_keys
+    
 
+    def get_resource_paths(self) -> Dict[str, ResourcePath]:
+        """Get all resource paths.
+    
+        :return: all resource paths.
+        """
+        return self.resource_paths
+    
+    
     def _add_resources(self, resources: Dict[str, OLIVE_RESOURCE_ANNOTATIONS]):
         for resource_name, resource_path in resources.items():
             print(f"resource_name is {resource_name}, {resource_path}")
