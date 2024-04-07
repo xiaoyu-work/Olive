@@ -67,7 +67,7 @@ class ResourceMixin:
     
         :return: all resource paths.
         """
-        return self.resource_paths
+        return {k: create_resource_path(v) for k, v in self.resource_paths}
     
     
     def _add_resources(self, resources: Dict[str, OLIVE_RESOURCE_ANNOTATIONS]):
