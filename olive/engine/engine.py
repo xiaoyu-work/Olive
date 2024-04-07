@@ -22,6 +22,7 @@ from olive.exception import EXCEPTIONS_TO_RAISE, OlivePassError
 from olive.hardware import AcceleratorSpec
 from olive.model import ModelConfig
 from olive.model.handler.base import OliveModelHandler
+from olive.resource_path import create_resource_path
 from olive.strategy.search_strategy import SearchStrategy
 from olive.systems.common import SystemType
 from olive.systems.olive_system import OliveSystem
@@ -749,7 +750,11 @@ class Engine:
         if model_config is not None and model_handler is not None:
             logger.warning("Both model_config and model_handler are provided. Use model_config.")
 
-        resource_paths = model_config.get_resource_paths() if model_config else model_handler.get_resource_paths()
+        if model_config:
+            resource_paths = model_config.get_resource_paths()
+        else:
+            print(f"model handler resource paths are {model_handler.resource_paths}")
+            resource_paths = {k: create_resource_path(v) for k, v in model_handler.resource_paths}
         for resource_name, resource_path in resource_paths.items():
             if not resource_path or resource_path.is_local_resource_or_string_name():
                 continue
