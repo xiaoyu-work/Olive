@@ -44,7 +44,6 @@ class LocalSystem(OliveSystem):
         execution_providers = accelerator.execution_provider if accelerator else None
 
         evaluator: OliveEvaluator = OliveEvaluatorFactory.create_evaluator_for_model(input_model)
-        print(f"input model model is {input_model.model}")
         return evaluator.evaluate(
             input_model, data_root, metrics, device=device, execution_providers=execution_providers
         )

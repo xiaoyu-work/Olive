@@ -206,6 +206,7 @@ class OliveEvaluator(ABC):
             # priority: dataloader_func > data_config > user_config.input_names/input_shapes > model io_config
             metric = OliveEvaluator.generate_metric_user_config_with_model_io(original_metric, model)
             dataloader, eval_func, post_func = OliveEvaluator.get_user_config(model.framework, data_root, metric)
+            print(f"1 model.model type is {type(model.model)}")
             if metric.type == MetricType.ACCURACY:
                 metrics_res[metric.name] = self._evaluate_accuracy(
                     model, data_root, metric, dataloader, post_func, device, execution_providers
@@ -431,6 +432,7 @@ class OnnxEvaluator(OliveEvaluator, OnnxEvaluatorMixin, framework=Framework.ONNX
     ) -> Tuple[OrtInferenceSession, Dict[str, Any]]:
         """Get the session wrapper for the model."""
         # user.config.inference_settings > model.inference_settings > default inference_settings
+        print(f"3: model.model is type {type(model.model)}")
         inference_settings = OnnxEvaluator.get_inference_settings(metric, model)
         session = model.prepare_session(
             inference_settings=inference_settings,
@@ -468,6 +470,7 @@ class OnnxEvaluator(OliveEvaluator, OnnxEvaluatorMixin, framework=Framework.ONNX
         device: Device = Device.CPU,
         execution_providers: Union[str, List[str]] = None,
     ) -> Tuple[OliveModelOutput, Any]:
+        print(f"4: model.model is type {type(model.model)}")
         session, inference_settings = OnnxEvaluator.get_session_wrapper(
             model, metric, dataloader, device, execution_providers
         )

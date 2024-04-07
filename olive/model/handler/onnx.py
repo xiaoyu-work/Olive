@@ -88,7 +88,7 @@ class ONNXModelHandler(OliveModelHandler, OnnxEpValidateMixin, OnnxGraphMixin): 
         execution_providers: Union[str, List[str]] = None,
         rank: Optional[int] = None,
     ):
-        print(f"in model handler, the model is {self.model}")
+        print(f"prepare session model type is {type(self.model)}")
         # user provided inference_settings > model's inference_settings > default settings
         inference_settings = self.merge_inference_settings(inference_settings, execution_providers)
         if not inference_settings["execution_provider"]:
@@ -99,9 +99,7 @@ class ONNXModelHandler(OliveModelHandler, OnnxEpValidateMixin, OnnxGraphMixin): 
         device_id = rank if device == Device.GPU else None
 
         try:
-            print(f"before model is {self.model}")
             model = self.model if self.model is not None else self.model_path
-            print(f"so wei have model now??? {model}")
             return get_ort_inference_session(model, inference_settings, self.use_ort_extensions, device_id)
         except OrtSessionFallbackError as e:
             raise OliveEvaluationError(e) from e
