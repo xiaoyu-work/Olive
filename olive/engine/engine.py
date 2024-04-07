@@ -323,7 +323,7 @@ class Engine:
         prefix_output_name = Engine._get_prefix_output_name(output_name, accelerator_spec)
         
         if self.target.system_type != SystemType.AzureML:
-            input_model_config = self._prepare_non_local_model(input_model_config)
+            input_model_config = self._prepare_non_local_model(model_config=input_model_config)
         
         try:
             if evaluate_input_model and not self.evaluator_config:
@@ -742,29 +742,25 @@ class Engine:
 
         return ModelConfig.from_json(model_json)
 
-    def _prepare_non_local_model(self, model_config: ModelConfig) -> ModelConfig:
+    def _prepare_non_local_model(self, *, model_config: ModelConfig = None, model_handler: OliveModelHandler = None) -> ModelConfig:
         """Prepare models with non-local model path for local run by downloading the model resources to cache."""
         # TODO(myguo): maybe we can move this method into OliveSystem?
-        resource_paths = model_config.get_resource_paths()
+        assert model_config or model_handler, "Either model_config or model must be provided."
+        if model_config is not None and model_handler is not None:
+            logger.warning("Both model_config and model_handler are provided. Use model_config.")
+
+        resource_paths = model_config.get_resource_paths() if model_config else model_handler.get_resource_paths()
         for resource_name, resource_path in resource_paths.items():
             if not resource_path or resource_path.is_local_resource_or_string_name():
                 continue
             downloaded_resource_path = cache_utils.download_resource(resource_path, self._config.cache_dir)
             if downloaded_resource_path:
                 # set local resource path
-                model_config.config[resource_name] = downloaded_resource_path
-
-        return model_config
-
-    def _prepare_non_local_model(self, model: OliveModelHandler) -> None:
-        resource_paths = model.get_resource_paths()
-        for resource_name, resource_path in resource_paths.items():
-            if not resource_path or resource_path.is_local_resource_or_string_name():
-                continue
-            downloaded_resource_path = cache_utils.download_resource(resource_path, self._config.cache_dir)
-            if downloaded_resource_path:
-                model.set_resource(resource_name, downloaded_resource_path)
-        
+                if model_config:
+                    model_config.config[resource_name] = downloaded_resource_path
+                else:
+                    model_handler.set_resource(resource_name, downloaded_resource_path)
+        return model_config if model_config else model_handler
 
     def _init_input_model(self, input_model_config: ModelConfig):
         """Initialize the input model."""
@@ -979,7 +975,7 @@ class Engine:
         host = self.host_for_pass(pass_id)
 
         if host.system_type != SystemType.AzureML and input_model.model is None:
-            self._prepare_non_local_model(input_model)
+            self._prepare_non_local_model(model_handler=input_model)
 
         run_start_time = datetime.now().timestamp()
         try:
@@ -1109,7 +1105,7 @@ class Engine:
         metrics = evaluator_config.metrics if evaluator_config else []
 
         if self.target.system_type != SystemType.AzureML and model.model is None:
-            self._prepare_non_local_model(model)
+            self._prepare_non_local_model(model_handler=model)
 
         signal = self.target.evaluate_model(model, data_root, metrics, accelerator_spec)
 
