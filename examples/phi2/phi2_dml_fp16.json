@@ -20,9 +20,9 @@
             "config": {
                 "accelerators": [
                     {
-                        "device": "cpu",
+                        "device": "GPU",
                         "execution_providers": [
-                            "CPUExecutionProvider"
+                            "DmlExecutionProvider"
                         ]
                     }
                 ]
@@ -58,88 +58,15 @@
         }
     },
     "passes": {
-        "slice": {
-            "type": "SliceGPT",
-            "config": {
-                "sparsity": 0.4,
-                "calibration_data_config": "wikitext2"
-            }
-        },
-        "qlora": {
-            "type": "QLoRA",
-            "config": {
-                "compute_dtype": "bfloat16",
-                "quant_type": "nf4",
-                "double_quant": true,
-                "lora_r": 64,
-                "lora_alpha": 64,
-                "lora_dropout": 0.1,
-                "train_data_config": "dataset_default_train",
-                "eval_dataset_size": 0.3,
-                "training_args": {
-                    "seed": 0,
-                    "data_seed": 42,
-                    "per_device_train_batch_size": 1,
-                    "per_device_eval_batch_size": 1,
-                    "gradient_accumulation_steps": 4,
-                    "gradient_checkpointing": false,
-                    "learning_rate": 0.0001,
-                    "num_train_epochs":3,
-                    "max_steps": 10,
-                    "logging_steps": 10,
-                    "evaluation_strategy": "steps",
-                    "eval_steps": 187,
-                    "group_by_length": true,
-                    "adam_beta2": 0.999,
-                    "max_grad_norm": 0.3
-                }
-            }
-        },
         "convert": {
             "type": "OnnxConversion",
             "config": {
                 "merge_adapter_weights": true,
-                "use_dynamo_exporter": true,
+                "use_dynamo_exporter": false,
                 "torch_dtype": "float32",
-                "target_opset": 18,
+                "target_opset": 17,
                 "save_as_external_data": true,
                 "all_tensors_to_one_file": true
-            }
-        },
-        "optimum_convert": {
-            "type": "OptimumConversion"
-        },
-        "optimize_cpu": {
-            "type": "OrtTransformersOptimization",
-            "config": {
-                "model_type": "phi",
-                "use_gpu": false,
-                "keep_io_types": false,
-                "num_heads": 32,
-                "hidden_size": 2560,
-                "opt_level": 0,
-                "optimization_options": {
-                    "attention_op_type": "MultiHeadAttention"
-                },
-                "save_as_external_data": true,
-                "all_tensors_to_one_file": true
-            }
-        },
-        "optimize_cuda": {
-            "type": "OrtTransformersOptimization",
-            "config": {
-                "model_type": "phi",
-                "use_gpu": true,
-                "keep_io_types": false,
-                "num_heads": 32,
-                "hidden_size": 2560,
-                "opt_level": 0,
-                "optimization_options": {
-                    "attention_op_type": "GroupQueryAttention"
-                },
-                "save_as_external_data": true,
-                "all_tensors_to_one_file": true,
-                "float16": true
             }
         },
         "optimize_dml": {
@@ -177,15 +104,6 @@
                 "save_as_external_data": true,
                 "all_tensors_to_one_file": true,
                 "float16": true
-            }
-        },
-        "blockwise_quant_int4": {
-            "type": "OnnxMatMul4Quantizer",
-            "config": {
-                "save_as_external_data": true,
-                "all_tensors_to_one_file": true,
-                "block_size": 16,
-                "is_symmetric": true
             }
         },
         "perf_tuning": {
@@ -233,7 +151,9 @@
                 "split": "train",
                 "component_kwargs": {
                     "pre_process_data": {
-                        "text_cols": ["text"],
+                        "text_cols": [
+                            "text"
+                        ],
                         "source_max_len": 2048
                     }
                 }
@@ -241,7 +161,7 @@
         }
     },
     "engine": {
-        "evaluate_input_model": true,
+        "evaluate_input_model": false,
         "evaluator": "common_evaluator",
         "host": "local_system",
         "target": "local_system",
@@ -251,5 +171,12 @@
         "clean_cache": false,
         "log_severity_level": 0,
         "log_to_file": false
-    }
+    },
+    "pass_flows": [
+        [
+            "convert",
+            "optimize_dml",
+            "perf_tuning"
+        ]
+    ]
 }

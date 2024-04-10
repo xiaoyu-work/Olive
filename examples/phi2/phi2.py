@@ -18,6 +18,8 @@ SUPPORTED_WORKFLOWS = {
     "cpu_int4": [["convert", "optimize_cpu", "blockwise_quant_int4", "perf_tuning"]],
     "cuda_fp16": [["convert", "optimize_cuda", "perf_tuning"]],
     "cuda_int4": [["convert", "optimize_cuda", "blockwise_quant_int4", "perf_tuning"]],
+    "dml_fp16": [["convert", "optimize_dml", "perf_tuning"]],
+    "dml_int4": [["convert", "optimize_dml", "blockwise_quant_int4", "perf_tuning"]],
     "slicegpt": [["slice"]],
 }
 SUPPORTED_INFERENCE_CONFIG = {
@@ -46,11 +48,24 @@ SUPPORTED_INFERENCE_CONFIG = {
         "use_fp16": True,
         "use_step": platform.system() == "Linux",
     },
+    "dml_fp16": {
+        "device_id": 0,
+    },
+    "dml_int4": {
+        "device_id": 0,
+    },
 }
 
 DEVICE_TO_EP = {
     "cpu": "CPUExecutionProvider",
-    "gpu": "CUDAExecutionProvider",
+    "cuda": "CUDAExecutionProvider",
+    "dml": "DmlExecutionProvider",
+}
+
+DEVICE_TO_ACCELERATOR = {
+    "cpu": "CPU",
+    "cuda": "GPU",
+    "dml": "GPU",
 }
 
 
@@ -61,8 +76,8 @@ def get_args(raw_args):
         "--model_type",
         type=str,
         default=None,
-        choices=["cpu_fp32", "cpu_int4", "cuda_fp16", "cuda_int4"],
-        help="Choose from cpu_fp32, cpu_int4, cuda_fp16, cuda_int4",
+        choices=["cpu_fp32", "cpu_int4", "cuda_fp16", "cuda_int4", "dml_fp16", "dml_int4"],
+        help="Choose from cpu_fp32, cpu_int4, cuda_fp16, cuda_int4, dml_fp16, dml_int4",
     )
     parser.add_argument(
         "--finetune_method",
@@ -84,7 +99,7 @@ def get_args(raw_args):
     parser.add_argument(
         "--genai_optimization",
         action="store_true",
-        help="Use optimum optimization",
+        help="Use genai optimization",
     )
     parser.add_argument(
         "--slicegpt",
@@ -133,13 +148,13 @@ def main(raw_args=None):
         with open(json_file_template) as f:
             template_json = json.load(f)
             ep_str, precision = model_type.split("_")
-            device = "GPU" if ep_str == "cuda" else "CPU"
+            accelerator_device = DEVICE_TO_ACCELERATOR[ep_str]
             template_json["passes"]["genai_exporter"]["config"]["precision"] = precision
             template_json["systems"]["local_system"]["config"]["accelerators"] = [
-                {"device": device, "execution_providers": [DEVICE_TO_EP[device.lower()]]}
+                {"device": accelerator_device, "execution_providers": [DEVICE_TO_EP[ep_str]]}
             ]
 
-        new_json_file = f"phi2_genai_{device.lower()}.json"
+        new_json_file = f"phi2_genai_{ep_str}.json"
         with open(new_json_file, "w") as f:
             json.dump(template_json, f, indent=4)
 
@@ -172,10 +187,10 @@ def main(raw_args=None):
         if args.finetune_method:
             pass_flows[0].append(args.finetune_method)
             # torch fine tuning does not require execution provider, just set it to CUDAExecutionProvider
-            update_accelerator(template_json, "gpu")
+            update_accelerator(template_json, "cuda")
         if args.slicegpt:
             pass_flows[0].extend(SUPPORTED_WORKFLOWS["slicegpt"][0])
-            update_accelerator(template_json, "gpu")
+            update_accelerator(template_json, "cuda")
             del template_json["input_model"]["config"]["model_script"]
             del template_json["input_model"]["config"]["dummy_inputs_func"]
             del template_json["input_model"]["config"]["io_config"]
@@ -191,7 +206,11 @@ def main(raw_args=None):
                         pass_flow.remove("perf_tuning")
 
             if "cuda" in model_type:
-                update_accelerator(template_json, "gpu")
+                update_accelerator(template_json, "cuda")
+
+            if "dml" in model_type:
+                update_accelerator(template_json, "dml")
+                template_json["engine"]["evaluate_input_model"] = False
 
             if "cpu" in model_type:
                 update_accelerator(template_json, "cpu")
@@ -227,21 +246,33 @@ def main(raw_args=None):
     elif model_type and not args.slicegpt:
         output_model_path = get_output_model_path(footprints)
         if args.inference and model_type in SUPPORTED_INFERENCE_CONFIG:
-            from generate import run as generate_run
+            if "dml" in model_type:
+                from generate_dml import run as generate_run
 
-            for text in generate_run(
-                args.prompt,
-                output_model_path,
-                **SUPPORTED_INFERENCE_CONFIG[model_type],
-                use_optimum=args.optimum_optimization,
-                max_length=args.max_length,
-            ):
-                print(f"Generation output: {text}")  # noqa: T201
-                print("*" * 50)  # noqa: T201
+                for text in generate_run(
+                    args.prompt,
+                    output_model_path,
+                    **SUPPORTED_INFERENCE_CONFIG[model_type],
+                    max_length=args.max_length,
+                ):
+                    print(f"Generation output: {text}")  # noqa: T201
+                    print("*" * 50)  # noqa: T201
+            else:
+                from generate import run as generate_run
+
+                for text in generate_run(
+                    args.prompt,
+                    output_model_path,
+                    **SUPPORTED_INFERENCE_CONFIG[model_type],
+                    use_optimum=args.optimum_optimization,
+                    max_length=args.max_length,
+                ):
+                    print(f"Generation output: {text}")  # noqa: T201
+                    print("*" * 50)  # noqa: T201
 
 
 def update_accelerator(config, device):
-    config["systems"]["local_system"]["config"]["accelerators"][0]["device"] = device
+    config["systems"]["local_system"]["config"]["accelerators"][0]["device"] = DEVICE_TO_ACCELERATOR[device]
     config["systems"]["local_system"]["config"]["accelerators"][0]["execution_providers"] = [DEVICE_TO_EP[device]]
 
 
