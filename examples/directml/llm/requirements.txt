@@ -1,3 +1,4 @@
+autoawq
 
 huggingface-hub
 markdown

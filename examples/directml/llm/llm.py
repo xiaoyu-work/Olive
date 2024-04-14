@@ -18,13 +18,7 @@ import torch
 import transformers
 from chat_app.app import launch_chat_app
 from huggingface_hub import hf_hub_download
-from model_type_mapping import (
-    get_all_supported_models,
-    get_model_dir,
-    get_model_name,
-    get_model_repo_id,
-    get_supported_lvlm_models,
-)
+from model_type_mapping import get_model_dir, get_supported_lvlm_models
 from run_llm_io_binding import run_llm_io_binding
 from run_vision_llm_io_binding import run_vision_llm_io_binding
 
@@ -129,8 +123,8 @@ def optimize(
     set_config_parameters(tokenizer, repo_id, num_layers)
 
     script_dir = Path(__file__).resolve().parent
-    shutil.rmtree(script_dir / "footprints", ignore_errors=True)
-    shutil.rmtree(script_dir / "cache", ignore_errors=True)
+    # shutil.rmtree(script_dir / "footprints", ignore_errors=True)
+    # shutil.rmtree(script_dir / "cache", ignore_errors=True)
 
     with Path.open(script_dir / "config_llm.json") as fin:
         olive_config = json.load(fin)
@@ -160,6 +154,11 @@ def optimize(
             "cuda": ["CUDAExecutionProvider"],
         }[device]
 
+        if Path(repo_id).is_dir():
+            olive_config["input_model"]["config"]["model_path"] = repo_id
+        else:
+            olive_config["input_model"]["hf_config"]["model_name"] = repo_id
+
         olive_config["engine"]["output_name"] = model_name
         olive_config["passes"]["optimize"]["config"]["hidden_size"] = config.hidden_size
         olive_config["passes"]["optimize"]["config"]["num_heads"] = config.num_heads
@@ -182,10 +181,10 @@ def optimize(
         # Set the input names and dynamic axes
         io_config = olive_config["input_model"]["config"]["io_config"]
 
+        io_config["input_names"].append("attention_mask")
+
         if not is_vision_model:
             io_config["input_names"].append("position_ids")
-
-        io_config["input_names"].append("attention_mask")
 
         if is_vision_model:
             io_config["input_names"].append("pixel_values")
@@ -299,9 +298,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--device", type=str, choices=["dml", "cuda"], default="dml")
     parser.add_argument(
-        "--model_type",
-        choices=get_all_supported_models(),
-        help="Which model to convert.",
+        "--repo_id",
+        help="Huggingface repo id or path to the local model",
         required=True,
         type=str,
     )
@@ -321,12 +319,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_dir = get_model_dir(args.model_type)
+    model_name = args.repo_id.replace("/", "_").replace("\\", "_")
+    model_dir = get_model_dir(model_name)
 
     if args.optimize or not (model_dir).exists():
-        repo_id = get_model_repo_id(args.model_type)
-        model_name = get_model_name(args.model_type)
-        optimize(model_dir, repo_id, model_name, args.device, args.num_layers, args.quant_strategy)
+        optimize(model_dir, args.repo_id, model_name, args.device, args.num_layers, args.quant_strategy)
 
     if not args.optimize:
         if args.interactive:

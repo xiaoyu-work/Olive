@@ -75,7 +75,6 @@ def get_model_type(repo_id: str):
     raise ValueError(f"repo_id '{repo_id}' not found")
 
 
-def get_model_dir(model_type: str):
-    model_name = get_model_name(model_type)
+def get_model_dir(model_name: str):
     script_dir = Path(__file__).resolve().parent
     return script_dir / "models" / "optimized" / model_name

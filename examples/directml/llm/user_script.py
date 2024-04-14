@@ -92,14 +92,10 @@ def decoder_torch_inputs(model):
     inputs = {
         "attention_mask": torch.zeros((batch_size, max_seq_len), dtype=torch.int64),
         "past_key_values": [
-            {
-                "key": torch.rand(
-                    (batch_size, config.num_key_value_heads, past_seq_len, head_size), dtype=torch.float32
-                ),
-                "value": torch.rand(
-                    (batch_size, config.num_key_value_heads, past_seq_len, head_size), dtype=torch.float32
-                ),
-            }
+            (
+                torch.rand((batch_size, config.num_key_value_heads, past_seq_len, head_size), dtype=torch.float32),
+                torch.rand((batch_size, config.num_key_value_heads, past_seq_len, head_size), dtype=torch.float32),
+            )
             for _ in range(config.num_layers)
         ],
     }
