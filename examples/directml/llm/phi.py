@@ -18,7 +18,7 @@ PHI_MAPPING = {
     "mixer": "self_attn",
     "Wqkv": "query_key_value",
     "dense": "o_proj",
-    "mlp.fc1": "mlp.gate_proj",
+    "mlp.gate_proj": "mlp.gate_proj",
     "mlp.fc2": "mlp.down_proj",
 }
 
@@ -37,15 +37,15 @@ def find_weight_by_subname(v_dict, subname):
     return value_list[0]
 
 
-def convert_phi_weights():
-    new_dict = OrderedDict()
-    original_weights_keys = sorted(config.state_dict.keys())
+# def convert_phi_weights():
+#     new_dict = OrderedDict()
+#     original_weights_keys = sorted(config.state_dict.keys())
 
-    for original_weights_key in original_weights_keys:
-        new_key = map_key(original_weights_key)
-        new_dict[new_key] = config.state_dict[original_weights_key]
+#     for original_weights_key in original_weights_keys:
+#         new_key = map_key(original_weights_key)
+#         new_dict[new_key] = config.state_dict[original_weights_key]
 
-    return new_dict
+#     return new_dict
 
 def convert_phi_weights():
     converted_weights = OrderedDict()
@@ -57,7 +57,7 @@ def convert_phi_weights():
         if "rotary_emb" in new_key:
             continue
 
-        if "Wqkv" in new_key:
+        if "qkv_proj" in new_key:
             if "weight" in new_key:
                 weight = config.state_dict[new_key]
                 weights_shape = weight.shape
@@ -66,9 +66,9 @@ def convert_phi_weights():
                     .transpose(0, 1)
                     .reshape(*weights_shape)
                 ).view(config.num_heads, 3, -1)
-                q_proj_key = map_key(new_key.replace("Wqkv", "q_proj"))
-                k_proj_key = map_key(new_key.replace("Wqkv", "k_proj"))
-                v_proj_key = map_key(new_key.replace("Wqkv", "v_proj"))
+                q_proj_key = map_key(new_key.replace("qkv_proj", "q_proj"))
+                k_proj_key = map_key(new_key.replace("qkv_proj", "k_proj"))
+                v_proj_key = map_key(new_key.replace("qkv_proj", "v_proj"))
                 converted_weights[q_proj_key] = weight[:, 0, ...].reshape(config.hidden_size, config.hidden_size)
                 converted_weights[k_proj_key] = weight[:, 1, ...].reshape(config.hidden_size, config.hidden_size)
                 converted_weights[v_proj_key] = weight[:, 2, ...].reshape(config.hidden_size, config.hidden_size)
@@ -79,9 +79,9 @@ def convert_phi_weights():
                 bias = config.state_dict[new_key]
                 bias_shape = bias.shape
                 bias = bias.view(3, config.num_heads, -1).transpose(0, 1).reshape(*bias_shape).view(config.num_heads, 3, -1)
-                q_proj_key = map_key(new_key.replace("Wqkv", "q_proj"))
-                k_proj_key = map_key(new_key.replace("Wqkv", "k_proj"))
-                v_proj_key = map_key(new_key.replace("Wqkv", "v_proj"))
+                q_proj_key = map_key(new_key.replace("qkv_proj", "q_proj"))
+                k_proj_key = map_key(new_key.replace("qkv_proj", "k_proj"))
+                v_proj_key = map_key(new_key.replace("qkv_proj", "v_proj"))
                 converted_weights[q_proj_key] = bias[..., 0, :].reshape(config.hidden_size)
                 converted_weights[k_proj_key] = bias[..., 1, :].reshape(config.hidden_size)
                 converted_weights[v_proj_key] = bias[..., 2, :].reshape(config.hidden_size)

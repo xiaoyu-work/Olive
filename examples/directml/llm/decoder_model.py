@@ -170,7 +170,6 @@ class TransformerLayer(torch.nn.Module):
 
         if config.apply_residual_connection_post_layernorm:
             attn_norm_output = self.post_attention_layernorm(h)
-
         return h + self.mlp(attn_norm_output), k_out, v_out
 
 
@@ -345,11 +344,10 @@ class MLP(torch.nn.Module):
 
     def forward(self, x):
         w1x = self.gate_proj(x)
-
         if config.hidden_act == "silu":
-            w1x, gate = w1x.chunk(2, dim=-1)
-            w1x = w1x * self.act(gate)
-            return self.down_proj(w1x)
+            gate, y = w1x.chunk(2, dim=-1)
+            y = y * self.act(gate)
+            return self.down_proj(y)
         elif self.act is not None:
             return self.down_proj(self.act(w1x))
         else:

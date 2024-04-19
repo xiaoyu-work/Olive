@@ -42,6 +42,7 @@ def run_llm_io_binding(
     ]
 
     model_dir = get_model_dir(model_type)
+    print (model_dir)
     llm_session_options = onnxruntime.SessionOptions()
     llm_session_options.add_free_dimension_override_by_name("batch_size", 1)
     llm_session_options.add_free_dimension_override_by_name("max_seq_len", max_seq_len)
@@ -64,6 +65,7 @@ def run_llm_io_binding(
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     tokenizer.chat_template = get_chat_template(model_type) or tokenizer.chat_template
 
+    print (prompt)
     tokens = tokenizer.apply_chat_template([{"role": "user", "content": prompt}], return_tensors="np")
     tokens = np.asarray(tokens, dtype=np.int64)
     tokens = onnxruntime.OrtValue.ortvalue_from_numpy(tokens, device)

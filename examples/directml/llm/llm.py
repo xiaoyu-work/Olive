@@ -32,14 +32,15 @@ from olive.workflows import run as olive_run
 
 
 def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, num_layers: Optional[int]):
+    
+    print (repo_id)
     if repo_id == "llava-hf/llava-1.5-7b-hf":
         hugggingface_model = transformers.LlavaForConditionalGeneration.from_pretrained(repo_id)
         llm_model = hugggingface_model.language_model
         main_model = hugggingface_model
 
-    elif "phi3" in repo_id:
-        checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi3"
-        model = transformers.AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype="auto", trust_remote_code=True)
+    elif "phi-3" in repo_id:
+        model = transformers.AutoModelForCausalLM.from_pretrained(repo_id, torch_dtype="auto", trust_remote_code=True)
         llm_model = model
         main_model = model
     else:
@@ -97,13 +98,12 @@ def set_config_parameters(tokenizer: transformers.AutoTokenizer, repo_id: str, n
     #     raise ValueError("Normalization epsilon value was not found")
         
     config.normalization_type = "rms"
-    config.epsilon = llm_model.config.layer_norm_eps
+    config.epsilon = llm_model.config.rms_norm_eps
 
-    print (repo_id)
     config.model_id = repo_id
     # config.normalization_type = "rms" if hasattr(llm_model.config, "rms_norm_eps") else "layer_norm"
 
-    print (config.normalization_type)
+    print (config.strict_weights_loading)
     config.partial_rotary_factor = getattr(llm_model.config, "partial_rotary_factor", 1.0)
     config.max_position_embeddings = (
         llm_model.config.max_position_embeddings if hasattr(llm_model.config, "max_position_embeddings") else 4096
@@ -163,11 +163,12 @@ def optimize(
 
         # Some models are too fragile and need layer norm to be performed in fp32 to keep their accuracy.
         # bfloat16 could fix this, but since DML doesn't support it we need to fall back to fp32.
-        models_that_need_fp32_layer_norm = ["llava-hf_llava-1.5-7b-hf", "tiiuae_falcon-7b-instruct"]
+        models_that_need_fp32_layer_norm = ["llava-hf_llava-1.5-7b-hf", "tiiuae_falcon-7b-instruct", "._phi-3-mini_phi-3-mini-final"]
         models_that_need_fp32_mha = ["llava-hf_llava-1.5-7b-hf", "microsoft_phi-2"]
 
         force_fp32_ops = olive_config["passes"]["optimize"]["config"].get("force_fp32_ops", [])
 
+        print (model_name)
         if model_name in models_that_need_fp32_layer_norm:
             force_fp32_ops.extend(["SimplifiedLayerNormalization", "LayerNormalization"])
 

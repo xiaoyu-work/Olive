@@ -27,15 +27,15 @@ data_type = torch.float16
 
 torch.set_default_dtype(data_type)
 
-checkpoint_dir = "C:\\Users\\xianz\\work\\Olive\\examples\\directml\\llm\\phi3"
+checkpoint_dir = "./phi-3-mini/phi-3-mini-final"
 tokenizer = AutoTokenizer.from_pretrained(checkpoint_dir, trust_remote_code=True)
-set_config_parameters(tokenizer, "phi3", config.num_layers)
+set_config_parameters(tokenizer, checkpoint_dir, config.num_layers)
 
 torch.set_default_device(device)
 # torch.set_printoptions(profile="full", sci_mode=False)
 
 model = get_or_create_decoder_model().half()
-
+# model = transformers.AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype="auto", trust_remote_code=True)
 
 # ---------------------------
 import os
@@ -105,3 +105,4 @@ for idx in range(max_seq_len):
     # update the cache.
     seq_len += 1
     x = next_token_id.unsqueeze(0)
+    # break
