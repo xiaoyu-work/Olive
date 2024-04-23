@@ -849,6 +849,7 @@ class Engine:
         if use_cloud_cache:
             logger.info("Cloud model cache is enabled. Check cloud model cache ...")
             cloud_cache_map_dir = self.cache_dir / "cloud_models"
+            cloud_cache_map_dir.mkdir(parents=True, exist_ok=True)
             passes_hash = hash_list(passes)
             cloud_cache_helper = OliveCloudCacheHelper(passes_hash, cloud_cache_map_dir, model_config)
             cloud_cache_map = cloud_cache_helper.download_model_cache_map()
