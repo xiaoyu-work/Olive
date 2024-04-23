@@ -855,18 +855,19 @@ class Engine:
             cloud_cache_map = cloud_cache_helper.download_model_cache_map()
             if cloud_cache_map:
                 cloud_model_path = cloud_cache_helper.exist_in_model_cache_map(cloud_cache_map)
-                if cloud_model_path == "FAILED_CONFIG":
-                    should_prune = True
-                    need_run_passes = False
-                else:
-                    model_config = cloud_cache_helper.download_cached_model_from_blob(
-                        cloud_model_path, cloud_cache_map_dir
-                    )
-                    need_run_passes = False
-                model_ids, pass_id = cloud_cache_helper.get_metadata()
-                if pass_id is None:
-                    need_run_passes = True
-                model_id = "-".join(model_ids)
+                if cloud_model_path is not None:
+                    if cloud_model_path == "FAILED_CONFIG":
+                        should_prune = True
+                        need_run_passes = False
+                    else:
+                        model_config = cloud_cache_helper.download_cached_model_from_blob(
+                            cloud_model_path, cloud_cache_map_dir
+                        )
+                        need_run_passes = False
+                    model_ids, pass_id = cloud_cache_helper.get_metadata()
+                    if pass_id is None:
+                        need_run_passes = True
+                    model_id = "-".join(model_ids)
 
         if need_run_passes:
             for pass_id, pass_search_point in passes:
