@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 
 import olive.cache as cache_utils
 from olive.common.config_utils import validate_config
-from olive.common.utils import hash_dict
+from olive.common.utils import hash_dict, hash_list
+from olive.engine.cloud_model_cache.utils import OliveCloudCacheHelper
 from olive.engine.config import FAILED_CONFIG, INVALID_CONFIG, PRUNED_CONFIGS
 from olive.engine.footprint import Footprint, FootprintNodeMetric
 from olive.engine.packaging.packaging_generator import generate_output_artifacts
@@ -22,6 +23,7 @@ from olive.evaluator.olive_evaluator import OliveEvaluatorConfig
 from olive.exception import EXCEPTIONS_TO_RAISE, OlivePassError
 from olive.hardware import AcceleratorSpec
 from olive.model import ModelConfig
+from olive.resource_path import ResourceType, create_resource_path
 from olive.strategy.search_strategy import SearchStrategy, SearchStrategyConfig
 from olive.systems.common import SystemType
 from olive.systems.system_config import SystemConfig
@@ -47,10 +49,10 @@ class Engine:
         host: Optional[Union[Dict[str, Any], "SystemConfig"]] = None,
         target: Optional[Union[Dict[str, Any], "SystemConfig"]] = None,
         evaluator: Optional[Union[Dict[str, Any], "OliveEvaluatorConfig"]] = None,
-        cache_dir=".olive-cache",
-        clean_cache=False,
-        clean_evaluation_cache=False,
-        plot_pareto_frontier=False,
+        cache_dir: str = ".olive-cache",
+        clean_cache: bool = False,
+        clean_evaluation_cache: bool = False,
+        plot_pareto_frontier: bool = False,
         *,
         azureml_client_config=None,
     ):
@@ -221,6 +223,7 @@ class Engine:
         output_dir: str = None,
         output_name: str = None,
         evaluate_input_model: bool = True,
+        use_cloud_cache: bool = False,
     ):
         """Run all the registered Olive passes on the input model and produce one or more candidate models.
 
@@ -268,6 +271,7 @@ class Engine:
                     output_name,
                     evaluate_input_model,
                     accelerator_spec,
+                    use_cloud_cache,
                 )
 
                 if run_result is None:
@@ -303,6 +307,7 @@ class Engine:
         output_name: str,
         evaluate_input_model: bool,
         accelerator_spec: "AcceleratorSpec",
+        use_cloud_cache: bool,
     ):
         # generate search space and initialize the passes for each hardware accelerator
         self.setup_passes(accelerator_spec)
@@ -340,6 +345,7 @@ class Engine:
                     accelerator_spec,
                     output_dir,
                     output_name,
+                    use_cloud_cache,
                 )
             else:
                 logger.debug("Running Olive in search mode ...")
@@ -350,6 +356,7 @@ class Engine:
                     accelerator_spec,
                     output_dir,
                     output_name,
+                    use_cloud_cache,
                 )
         except EXCEPTIONS_TO_RAISE:
             raise
@@ -411,6 +418,7 @@ class Engine:
         accelerator_spec: "AcceleratorSpec",
         output_dir: str = None,
         output_name: str = None,
+        use_cloud_cache: bool = False,
     ):
         """Run all the registered Olive pass flows in no-search mode."""
         for pass_item in self.passes.values():
@@ -426,7 +434,7 @@ class Engine:
             # run all the passes in the pass flow
             logger.debug("Running %s with no search ...", pass_flow)
             should_prune, signal, model_ids = self._run_passes(
-                passes_to_run, input_model_config, input_model_id, data_root, accelerator_spec
+                passes_to_run, input_model_config, input_model_id, data_root, accelerator_spec, use_cloud_cache
             )
 
             if should_prune:
@@ -486,6 +494,7 @@ class Engine:
         accelerator_spec: "AcceleratorSpec",
         output_dir: str = None,
         output_name: str = None,
+        use_cloud_cache: bool = False,
     ):
         """Run all the registered Olive passes in search model where search strategy is not None."""
         prefix_output_name = Engine._get_prefix_output_name(output_name, accelerator_spec)
@@ -529,8 +538,10 @@ class Engine:
 
             # run all the passes in the step
             should_prune, signal, model_ids = self._run_passes(
-                next_step["passes"], model_config, model_id, data_root, accelerator_spec
+                next_step["passes"], model_config, model_id, data_root, accelerator_spec, use_cloud_cache
             )
+            print("model_ids", model_ids)
+            print(self.footprints[accelerator_spec].nodes)
 
             # record feedback signal
             self.search_strategy.record_feedback_signal(next_step["search_point"], signal, model_ids, should_prune)
@@ -813,6 +824,7 @@ class Engine:
         model_id: str,
         data_root: str,
         accelerator_spec: "AcceleratorSpec",
+        use_cloud_cache: bool,
     ):
         """Run all the passes in the order they were registered.
 
@@ -821,16 +833,58 @@ class Engine:
         should_prune = False
         # run all the passes in the step
         model_ids = []
+        input_model_id = model_id
         pass_id = None
-        for pass_id, pass_search_point in passes:
-            model_config, model_id = self._run_pass(
-                pass_id, pass_search_point, model_config, model_id, data_root, accelerator_spec
-            )
-            if model_config in PRUNED_CONFIGS:
-                should_prune = True
-                logger.debug("Pruned for pass %s", pass_id)
-                break
-            model_ids.append(model_id)
+        need_run_passes = True
+
+        if use_cloud_cache and model_config.config.get("model_path"):
+            logger.info("Check model path")
+            model_path = model_config.config.get("model_path")
+            if model_path:
+                resurce_path = create_resource_path(model_path)
+                if resurce_path.type == ResourceType.StringName:
+                    logger.warning("Model path is a str name, should not use cloud model cache.")
+                    use_cloud_cache = False
+
+        if use_cloud_cache:
+            logger.info("Cloud model cache is enabled. Check cloud model cache ...")
+            cloud_cache_map_dir = self.cache_dir / "cloud_models"
+            passes_hash = hash_list(passes)
+            cloud_cache_helper = OliveCloudCacheHelper(passes_hash, cloud_cache_map_dir, model_config)
+            cloud_cache_map = cloud_cache_helper.download_model_cache_map()
+            if cloud_cache_map:
+                cloud_model_path = cloud_cache_helper.exist_in_model_cache_map(cloud_cache_map)
+                if cloud_model_path == "FAILED_CONFIG":
+                    should_prune = True
+                    need_run_passes = False
+                else:
+                    model_config = cloud_cache_helper.download_cached_model_from_blob(
+                        cloud_model_path, cloud_cache_map_dir
+                    )
+                    need_run_passes = False
+                model_ids, pass_id = cloud_cache_helper.get_metadata()
+                if pass_id is None:
+                    need_run_passes = True
+                model_id = "-".join(model_ids)
+
+        if need_run_passes:
+            for pass_id, pass_search_point in passes:
+                model_config, model_id = self._run_pass(
+                    pass_id, pass_search_point, model_config, model_id, data_root, accelerator_spec
+                )
+                if model_config in PRUNED_CONFIGS:
+                    should_prune = True
+                    logger.debug("Pruned for pass %s", pass_id)
+                    break
+                model_ids.append(model_id)
+
+            if use_cloud_cache:
+                cloud_model_path = "FAILED_CONFIG"
+                if model_config not in PRUNED_CONFIGS:
+                    cloud_model_path = cloud_cache_helper.upload_model_to_cloud_cache(model_config)
+                cloud_cache_helper.update_model_cache_map(cloud_cache_map, cloud_model_path)
+                cloud_cache_helper.update_metadata(model_ids, pass_id)
+                del cloud_cache_helper
 
         if not should_prune:
             # evaluate the model
@@ -840,7 +894,15 @@ class Engine:
                 signal = None
             else:
                 logger.info("Run model evaluation for the final model...")
-                signal = self._evaluate_model(model_config, model_id, data_root, evaluator_config, accelerator_spec)
+                signal = self._evaluate_model(
+                    model_config,
+                    model_id,
+                    data_root,
+                    evaluator_config,
+                    accelerator_spec,
+                    input_model_id,
+                    need_run_passes,
+                )
             logger.debug("Signal: %s", signal)
         else:
             signal = None
@@ -1010,6 +1072,8 @@ class Engine:
         data_root: str,
         evaluator_config: "OliveEvaluatorConfig",
         accelerator_spec: "AcceleratorSpec",
+        input_model_id: str = None,
+        need_run_passes: bool = True,
     ):
         """Evaluate a model."""
         logger.debug("Evaluating model ...")
@@ -1044,13 +1108,23 @@ class Engine:
         self._cache_evaluation(model_id_with_accelerator, signal)
 
         # footprint evaluation
-        self.footprints[accelerator_spec].record(
-            model_id=model_id,
-            metrics=FootprintNodeMetric(
-                value=signal,
-                if_goals_met=False,
-            ),
-        )
+        if need_run_passes:
+            self.footprints[accelerator_spec].record(
+                model_id=model_id,
+                metrics=FootprintNodeMetric(
+                    value=signal,
+                    if_goals_met=False,
+                ),
+            )
+        else:
+            self.footprints[accelerator_spec].record(
+                model_id=model_id,
+                parent_model_id=input_model_id,
+                metrics=FootprintNodeMetric(
+                    value=signal,
+                    if_goals_met=False,
+                ),
+            )
         return signal
 
     @staticmethod

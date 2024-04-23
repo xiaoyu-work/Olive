@@ -36,6 +36,7 @@ class RunEngineConfig(EngineConfig):
     output_dir: Union[Path, str] = None
     output_name: str = None
     packaging_config: Union[PackagingConfig, List[PackagingConfig]] = None
+    use_cloud_cache: bool = False
     log_severity_level: int = 1
     ort_log_severity_level: int = 3
     ort_py_log_severity_level: int = 3

@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,13 @@ def run_subprocess(cmd, env=None, cwd=None, check=False):
     stderr = out.stderr.decode("utf-8")
 
     return returncode, stdout, stderr
+
+
+def hash_list(list: List[Any]):
+    md5_hash = hashlib.md5()
+    encoded_list = json.dumps(list, sort_keys=True).encode()
+    md5_hash.update(encoded_list)
+    return md5_hash.hexdigest()
 
 
 def hash_string(string):  # pragma: no cover
