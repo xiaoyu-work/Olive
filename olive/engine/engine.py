@@ -447,6 +447,7 @@ class Engine:
             # names of the output models of the passes
             pass_output_names = [self.passes[pass_id]["output_name"] for pass_id in pass_flow]
             pass_output_names = [f"{name}_{accelerator_spec}" if name else None for name in pass_output_names]
+            print(f"pass_output_names: {pass_output_names}")
 
             # output dir with pass flow
             output_dir_with_pf = Path(output_dir) / "-".join(pass_flow)
@@ -470,6 +471,8 @@ class Engine:
                 # it is not supported to save compositepytorchmodel/compositemodel again
                 # so the output_model_json could be None
                 output_models[pass_output_model_id] = output_model_json
+                
+            print(f"output_models: {output_models}")
 
             # save the evaluation results to output_dir
             if signal is not None:
@@ -540,8 +543,6 @@ class Engine:
             should_prune, signal, model_ids = self._run_passes(
                 next_step["passes"], model_config, model_id, data_root, accelerator_spec, use_cloud_cache
             )
-            print("model_ids", model_ids)
-            print(self.footprints[accelerator_spec].nodes)
 
             # record feedback signal
             self.search_strategy.record_feedback_signal(next_step["search_point"], signal, model_ids, should_prune)
