@@ -448,6 +448,7 @@ class Engine:
             pass_output_names = [self.passes[pass_id]["output_name"] for pass_id in pass_flow]
             pass_output_names = [f"{name}_{accelerator_spec}" if name else None for name in pass_output_names]
             print(f"pass_output_names: {pass_output_names}")
+            print(f"model_ids: {model_ids}")
 
             # output dir with pass flow
             output_dir_with_pf = Path(output_dir) / "-".join(pass_flow)
@@ -459,6 +460,8 @@ class Engine:
 
             output_model_json = None
             for pass_output_name, pass_output_model_id in zip(pass_output_names, model_ids):
+                print(f"pass_output_name: {pass_output_name}")
+                print(f"pass_output_model_id: {pass_output_model_id}")
                 if not pass_output_name:
                     continue
                 output_model_json = cache_utils.save_model(
