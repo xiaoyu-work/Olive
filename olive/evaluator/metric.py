@@ -98,7 +98,7 @@ class Metric(ConfigBase):
     backend: Optional[str] = "torch_metrics"
     sub_types: List[SubMetric]
     user_config: ConfigBase = None
-    data_config: Optional[DataConfig] = None
+    data_config: DataConfig = None
 
     def get_inference_settings(self, framework):
         if self.user_config is None:

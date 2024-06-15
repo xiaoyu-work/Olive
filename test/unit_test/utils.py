@@ -4,6 +4,7 @@
 # --------------------------------------------------------------------------
 import os
 from pathlib import Path
+from typing import Union
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -42,6 +43,16 @@ class DummyDataset(Dataset):
         return self.size
 
 
+@Registry.register_dataset("dummy_dataset")
+def create_dummy_dataset(data_name: str, split: str, language: str, token: Union[bool, str] = True):
+    return DummyDataset(1)
+
+
+@Registry.register_dataloader("dummy_dataloader")
+def create_dummy_dataloader(dataset, batch_size, *args, **kwargs):
+    return DataLoader(dataset)
+
+
 class FixedDummyDataset(Dataset):
     def __init__(self, size):
         self.size = size
@@ -54,6 +65,16 @@ class FixedDummyDataset(Dataset):
 
     def __len__(self):
         return self.size
+
+
+@Registry.register_dataset("fixed_dummy_dataset")
+def create_fixed_dummy_dataset(data_name: str, split: str, language: str, token: Union[bool, str] = True):
+    return DummyDataset(1)
+
+
+@Registry.register_dataloader("fixed_dummy_dataloader")
+def create_fixed_dummy_dataloader(dataset, batch_size, *args, **kwargs):
+    return DataLoader(dataset)
 
 
 def pytorch_model_loader(model_path):
@@ -162,14 +183,6 @@ def get_mock_openvino_model():
     return olive_model
 
 
-def create_dataloader(datadir, batchsize, *args, **kwargs):
-    return DataLoader(DummyDataset(1))
-
-
-def create_fixed_dataloader(datadir, batchsize, *args, **kwargs):
-    return DataLoader(FixedDummyDataset(1))
-
-
 def get_accuracy_metric(
     *acc_subtype,
     random_dataloader=True,
@@ -178,7 +191,7 @@ def get_accuracy_metric(
     goal_type="threshold",
     goal_value=0.99,
 ):
-    accuracy_metric_config = {"dataloader_func": create_dataloader if random_dataloader else create_fixed_dataloader}
+    accuracy_metric_dataloader = "dummy_dataloader" if random_dataloader else "dummy_fixed_dataloader"
     accuracy_score_metric_config = {"task": "multiclass", "num_classes": 10}
     sub_types = [
         {
@@ -193,8 +206,13 @@ def get_accuracy_metric(
         name="accuracy",
         type=MetricType.ACCURACY,
         sub_types=sub_types,
-        user_config=user_config or accuracy_metric_config,
+        user_config=user_config,
         backend=backend,
+        data_config=DataConfig(
+            name=accuracy_metric_dataloader,
+            load_dataset_config=DataComponentConfig(type="dummy_dataset"),
+            dataloader_config=DataComponentConfig(type="dummy_dataloader"),
+        ),
     )
 
 
@@ -223,6 +241,11 @@ def get_custom_metric(user_config=None):
         type=MetricType.CUSTOM,
         sub_types=[{"name": "custom"}],
         user_config=user_config or {"evaluate_func": "eval_func", "user_script": user_script_path},
+        data_config=DataConfig(
+            name="dummy_data_config",
+            load_dataset_config=DataComponentConfig(type="dummy_dataset"),
+            dataloader_config=DataComponentConfig(type="dummy_dataloader"),
+        ),
     )
 
 
@@ -233,24 +256,32 @@ def get_custom_metric_no_eval():
 
 
 def get_latency_metric(*lat_subtype, user_config=None):
-    latency_metric_config = {"dataloader_func": create_dataloader}
     sub_types = [{"name": sub} for sub in lat_subtype]
     return Metric(
         name="latency",
         type=MetricType.LATENCY,
         sub_types=sub_types,
-        user_config=user_config or latency_metric_config,
+        user_config=user_config,
+        data_config=DataConfig(
+            name="dummy_data_config",
+            load_dataset_config=DataComponentConfig(type="dummy_dataset"),
+            dataloader_config=DataComponentConfig(type="dummy_dataloader"),
+        ),
     )
 
 
 def get_throughput_metric(*lat_subtype, user_config=None):
-    metric_config = {"dataloader_func": create_dataloader}
     sub_types = [{"name": sub} for sub in lat_subtype]
     return Metric(
         name="throughput",
         type=MetricType.THROUGHPUT,
         sub_types=sub_types,
-        user_config=user_config or metric_config,
+        user_config=user_config,
+        data_config=DataConfig(
+            name="dummy_data_config",
+            load_dataset_config=DataComponentConfig(type="dummy_dataset"),
+            dataloader_config=DataComponentConfig(type="dummy_dataloader"),
+        ),
     )
 
 

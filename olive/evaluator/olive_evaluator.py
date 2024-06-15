@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, NamedTuple, Tuple, 
 import numpy as np
 import torch
 
-import olive.data.template as data_config_template
 from olive.cache import get_local_path_from_root
 from olive.common.config_utils import ConfigBase
 from olive.common.ort_inference import OrtInferenceSession, prepare_io_bindings
@@ -27,7 +26,6 @@ from olive.evaluator.metric_backend import MetricBackend
 from olive.evaluator.metric_result import MetricResult, SubMetricResult, flatten_metric_result, joint_metric_key
 from olive.hardware import Device
 from olive.model import DistributedOnnxModelHandler, ONNXModelHandler
-from olive.model.config.io_config import is_io_config_static
 from olive.model.utils.onnx_utils import dump_tuning_result
 from olive.platform_sdk.qualcomm.utils.data_loader import FileListCommonDataLoader, FileListDataLoader
 
@@ -155,8 +153,8 @@ class OliveEvaluator(ABC):
         if metric.user_config.evaluate_func:
             raw_res = eval_func(
                 model,
-                get_local_path_from_root(data_root, metric.user_config.data_dir),
-                metric.user_config.batch_size,
+                get_local_path_from_root(data_root, metric.data_config.load_dataset_params.get("data_dir")),
+                metric.data_config.load_dataset_params.get("batch_size") or 1,
                 device,
                 execution_providers,
             )
@@ -191,11 +189,7 @@ class OliveEvaluator(ABC):
         execution_providers: Union[str, List[str]] = None,
     ) -> MetricResult:
         metrics_res = {}
-        for original_metric in metrics:
-            # use model io_config if user does not specify input_names and input_shapes
-            # only do this if data_config or dataloader is not provided
-            # priority: dataloader_func > data_config > user_config.input_names/input_shapes > model io_config
-            metric = OliveEvaluator.generate_metric_user_config_with_model_io(original_metric, model)
+        for metric in metrics:
             dataloader, eval_func, post_func = OliveEvaluator.get_user_config(model.framework, data_root, metric)
             if metric.type == MetricType.ACCURACY:
                 metrics_res[metric.name] = self._evaluate_accuracy(
@@ -218,41 +212,10 @@ class OliveEvaluator(ABC):
         return flatten_metric_result(metrics_res)
 
     @staticmethod
-    def generate_metric_user_config_with_model_io(metric: Metric, model: "OliveModelHandler"):
-        # if the io_config is not specified in the metrics, use the one in the model
-        # should not change the original metric object which is created from config jsons
-        # otherwise, if affects hashing + caching of the olive restoring.
-        metric = deepcopy(metric)
-        if metric.data_config:
-            return metric
-
-        io_config = model.io_config
-        if not io_config:
-            return metric
-
-        if not is_io_config_static(io_config):
-            # since Olive will not save the pytorch model's io_config to olive onnx model
-            # we cannot generate dummy data for the onnx model if this model has dynamic input shapes
-            # TODO(trajep): try to get static input shapes from onnx model.
-            # If so, we can move the dataloader for latency measurement.
-            logger.debug(
-                "Model input shapes are not static. Cannot use inferred input shapes for creating dummy data. This will"
-                " cause an error when creating dummy data for tuning."
-            )
-        if io_config and not metric.user_config.input_names and not metric.user_config.input_shapes:
-            metric.user_config.input_names = io_config["input_names"]
-            # input_shapes is optional for hf models
-            metric.user_config.input_shapes = io_config.get("input_shapes")
-            # input_types is optional which can be None. If None, it will be replaced with float32 in DummyDataset
-            metric.user_config.input_types = io_config.get("input_types")
-        return metric
-
-    @staticmethod
     def _get_func_kwargs(metric: Metric, func_name: str):
         """Get the function kwargs from the metric config."""
-        if metric.user_config.func_kwargs:
-            return metric.user_config.func_kwargs.get(func_name, {})
-        return {}
+        kwargs_name = func_name + "_kwargs"
+        return getattr(metric.user_config, kwargs_name, None) or {}
 
     @classmethod
     def get_user_config(cls, framework: Framework, data_root: str, metric: Metric):
@@ -266,20 +229,6 @@ class OliveEvaluator(ABC):
         if post_func_kwargs:
             # apply the kwargs to the post processing function
             post_func = partial(post_func, **post_func_kwargs)
-
-        # load the dataloader function and create the dataloader
-        dataloader_func = getattr(metric.user_config, "dataloader_func", None)
-        if dataloader_func:
-            data_dir = get_local_path_from_root(data_root, metric.user_config.data_dir)
-            dataloader = user_module.call_object(
-                dataloader_func,
-                data_dir,
-                metric.user_config.batch_size,
-                model_framework=framework,
-                **cls._get_func_kwargs(metric, "dataloader_func"),
-            )
-        else:
-            dataloader = None
 
         # load the evaluate function
         # priority: evaluate_func > metric_func
@@ -299,26 +248,10 @@ class OliveEvaluator(ABC):
                 eval_func = partial(eval_func, **kwargs)
 
         # get dataloader and/or post processing function from data_config if not specified in the metric config
-        if (not dataloader or not post_func) and metric.data_config:
+        if metric.data_config:
             dc = metric.data_config.to_data_container()
-
-            # TODO(trajep): remove user_scripts dataloader: we should respect user scripts
-            # dataloder to meet back compatibility for time being.
-            dataloader = dataloader or dc.create_dataloader(data_root)
+            dataloader = dc.create_dataloader(data_root)
             post_func = post_func or dc.config.post_process
-
-        # get dataloader and/or post processing function from model io_config if not specified in the metric config
-        # or data config
-        if metric.user_config.input_names and metric.user_config.input_shapes and not dataloader and not eval_func:
-            dataloader = (
-                data_config_template.dummy_data_config_template(
-                    input_names=metric.user_config.input_names,
-                    input_shapes=metric.user_config.input_shapes,
-                    input_types=metric.user_config.input_types,
-                )
-                .to_data_container()
-                .create_dataloader(data_root)
-            )
 
         return dataloader, eval_func, post_func
 
@@ -360,7 +293,7 @@ class OliveEvaluator(ABC):
         """Compute throughput metrics."""
         latency_metrics = OliveEvaluator.latency_helper(latencies)
         metric_res = {}
-        batch_size = metric.user_config.batch_size
+        batch_size = metric.data_config.dataloader_params.get("batch_size") or 1
         for sub_type in metric.sub_types:
             if sub_type.name == ThroughputSubType.MIN:
                 latency_sub_type_name = LatencySubType.MAX
