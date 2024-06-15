@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
 import copy
+from typing import Union
 
 import numpy as np
 import torch
@@ -24,6 +25,7 @@ from transformers import (
 )
 
 from olive.constants import Framework
+from olive.data.registry import Registry
 from olive.model import OliveModelHandler
 
 datasets_logging.disable_progress_bar()
@@ -146,11 +148,14 @@ def post_process(output):
 # -------------------------------------------------------------------------
 
 
-def create_dataloader(data_dir, batchsize, *args, **kwargs):
-    bert_dataset = BertDataset("Intel/bert-base-uncased-mrpc")
-    return torch.utils.data.DataLoader(
-        BertDatasetWrapper(bert_dataset.get_eval_dataset()), batch_size=batchsize, drop_last=True
-    )
+@Registry.register_dataset("bert_dataset")
+def create_dataset(data_name: str, split: str, language: str, token: Union[bool, str] = True):
+    return BertDataset(data_name).get_eval_dataset()
+
+
+@Registry.register_dataloader("bert_dataloader")
+def create_dataloader(dataset, batch_size, *args, **kwargs):
+    return torch.utils.data.DataLoader(BertDatasetWrapper(dataset), batch_size=batch_size, drop_last=True)
 
 
 # -------------------------------------------------------------------------
