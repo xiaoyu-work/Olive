@@ -11,7 +11,9 @@ from packaging import version
 from pytorch_lightning import LightningModule, seed_everything
 from torch.ao.quantization.fake_quantize import FakeQuantize, MovingAverageMinMaxObserver
 
+from olive.common.config_utils import validate_config
 from olive.constants import ModelFileFormat
+from olive.data.config import DataConfig
 from olive.model import PyTorchModelHandler
 from olive.passes.pytorch.cluster import barrier, create_cluster, is_master_proc
 from olive.passes.pytorch.pytorch_lightning_utils import create_ddp_strategy, create_trainer
@@ -31,9 +33,10 @@ class QuantizedModule(torch.nn.Module):
 
 
 class QatTrainer:
-    def __init__(self, model, config, output_model_path):
+    def __init__(self, model, config, data_root, output_model_path):
         self.model = model
         self.config = config
+        self.data_root = data_root
         self.output_model_path = output_model_path
 
     def execute_local(self) -> PyTorchModelHandler:
@@ -70,10 +73,9 @@ class QatTrainer:
                 if self.config.ptl_data_module:
                     ptl_data_module = self.config.ptl_data_module()
             else:
-                train_dataloader_func = self.config.train_dataloader_func(
-                    self.config.train_data_dir, self.config.train_batch_size
-                )
-                ptl_module = DefaultPTLModule(model=quan_model, training_dataloader=train_dataloader_func)
+                train_data_config = validate_config(self.config.train_data_config, DataConfig)
+                train_dataloader = train_data_config.to_data_container().create_dataloader(self.data_root)
+                ptl_module = DefaultPTLModule(model=quan_model, training_dataloader=train_dataloader)
 
             kwargs = {}
             if run_on_gpus:

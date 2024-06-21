@@ -128,7 +128,7 @@ class DummyDataset(BaseDataset):
                 dummy_inputs.update({input_name: torch.ones(input_shape, dtype=input_type)})
             dummy_inputs = dummy_inputs if len(dummy_inputs) > 1 else dummy_inputs[self.input_names[0]]
         label = 0
-        return dummy_inputs, label
+        return dummy_inputs, torch.tensor(label)
 
 
 class RawDataset(BaseDataset):
@@ -164,6 +164,7 @@ class RawDataset(BaseDataset):
         :param annotations_file: Name of the file containing the annotations. This file should be present in the
         data_dir. It is assumed to be a .npy file containing a numpy array. Default is None.
         """
+        # TODO(jambay): Deprecate this and replace it with QNN & SNPE specific implemetaitons
         # pylint: disable=super-init-not-called
         self.data_dir = Path(data_dir).resolve()
         self.input_names = input_names

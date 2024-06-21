@@ -2,8 +2,9 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
-from test.unit_test.utils import create_dataloader, get_pytorch_model
+from test.unit_test.utils import get_pytorch_model
 
+from olive.data.template import dummy_data_config_template
 from olive.hardware.accelerator import AcceleratorSpec
 from olive.passes.olive_pass import FullPassConfig, create_pass_from_dict
 from olive.passes.pytorch.quantization_aware_training import QuantizationAwareTraining
@@ -13,7 +14,7 @@ def test_quantization_aware_training_pass_default(tmp_path):
     # setup
     input_model = get_pytorch_model()
     config = {
-        "train_dataloader_func": create_dataloader,
+        "train_data_config": dummy_data_config_template([[1]]),
         "checkpoint_path": str(tmp_path / "checkpoint"),
     }
 
@@ -26,12 +27,9 @@ def test_quantization_aware_training_pass_default(tmp_path):
 
 def test_optional_ep(tmp_path):
     accl = AcceleratorSpec("cpu", None)
-    script_path = tmp_path / "user_script.py"
-    with script_path.open("w"):
-        pass
     p = create_pass_from_dict(
         QuantizationAwareTraining,
-        {"train_dataloader_func": "create_dataloader", "user_script": str(script_path)},
+        {"train_data_config": dummy_data_config_template([[1]])},
         accelerator_spec=accl,
     )
     qat_json = p.to_json()

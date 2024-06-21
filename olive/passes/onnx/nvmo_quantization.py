@@ -3,45 +3,21 @@
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
 import logging
-from copy import deepcopy
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, Union
+from typing import Any, Dict, Union
 
+from olive.common.config_utils import validate_config
+from olive.data.config import DataConfig
 from olive.hardware.accelerator import AcceleratorSpec
 from olive.model import OliveModelHandler
 from olive.model.utils import resolve_onnx_path
 from olive.passes import Pass
 from olive.passes.onnx.common import model_proto_to_olive_model
-from olive.passes.pass_config import ParamCategory, PassConfigParam
+from olive.passes.pass_config import PassConfigParam
 from olive.strategy.search_parameter import Categorical
 
 logger = logging.getLogger(__name__)
-
-
-# static quantization specific config
-_dataloader_config = {
-    "batch_size": PassConfigParam(
-        type_=int,
-        default_value=1,
-        description="Batch size for calibration.",
-    ),
-    "calib_size": PassConfigParam(
-        type_=int,
-        default_value=64,
-        description="Calibration data size.",
-    ),
-    "dataloader_func": PassConfigParam(
-        type_=Union[Callable, str],
-        category=ParamCategory.OBJECT,
-        required=True,
-        description="Function/function name to generate dataloader for calibration.",
-    ),
-    "dataloader_func_kwargs": PassConfigParam(
-        type_=Dict[str, Any],
-        description="Keyword arguments for dataloader_func.",
-    ),
-}
 
 
 class NVModelOptQuantization(Pass):
@@ -68,7 +44,7 @@ class NVModelOptQuantization(Pass):
 
     @classmethod
     def _default_config(cls, accelerator_spec: AcceleratorSpec) -> Dict[str, PassConfigParam]:
-        config = {
+        return {
             "precision": PassConfigParam(
                 type_=NVModelOptQuantization.Precision,
                 default_value="int4",
@@ -81,10 +57,17 @@ class NVModelOptQuantization(Pass):
                 searchable_values=Categorical(["RTN", "AWQ"]),
                 description="Algorithm of weight only quantization. Support 'RTN' and 'AWQ'.",
             ),
+            "batch_size": PassConfigParam(
+                type_=int,
+                default_value=None,
+                description="Batch size for calibration, overrides data_config/dataloader_config.",
+            ),
+            "data_config": PassConfigParam(
+                type_=Union[DataConfig, Dict],
+                required=True,
+                description="Data config to load data for computing latency.",
+            ),
         }
-
-        config.update(deepcopy(_dataloader_config))
-        return config
 
     def validate_search_point(
         self, search_point: Dict[str, Any], accelerator_spec: AcceleratorSpec, with_fixed_value: bool = False
@@ -111,13 +94,11 @@ class NVModelOptQuantization(Pass):
                 "Please install `olive-ai[nvmo]` or `nvidia-modelopt[onnx]` to use INT4 AWQ quantization!"
             ) from exc
 
-        calib_dataloader = self._user_module_loader.call_object(
-            config["dataloader_func"],
-            config["batch_size"],
-            config["calib_size"],
-            model_path=model.model_path,
-            **(config["dataloader_func_kwargs"] or {}),
-        )
+        data_config = validate_config(config["data_config"], DataConfig)
+        if config["batch_size"] is not None:
+            data_config.dataloader_params["batch_size"] = config["batch_size"]
+
+        calib_dataloader = data_config.to_data_container().create_dataloader(data_root)
 
         quantize_mode = (
             "int4_awq_clip" if config["algorithm"] == NVModelOptQuantization.Algorithm.AWQ else "int4_rtn_dq"

@@ -5,7 +5,8 @@
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Union
 
-from olive.cache import get_local_path_from_root
+from olive.common.config_utils import validate_config
+from olive.data.config import DataConfig
 from olive.hardware.accelerator import AcceleratorSpec
 from olive.model import PyTorchModelHandler
 from olive.passes import Pass
@@ -27,18 +28,14 @@ class QuantizationAwareTraining(Pass):
         else:
             from pytorch_lightning.loggers import LightningLoggerBase as Logger
         return {
-            "train_data_dir": PassConfigParam(
-                type_=str, description="Directory of training data.", category=ParamCategory.DATA
+            "train_data_config": PassConfigParam(
+                type_=Union[DataConfig, Dict],
+                required=True,
+                description="Data config for training.",
             ),
-            "val_data_dir": PassConfigParam(
-                type_=str, description="Directory of validation data.", category=ParamCategory.DATA
-            ),
-            "train_dataloader_func": PassConfigParam(
-                type_=Union[Callable, str],
-                category=ParamCategory.OBJECT,
-                description=(
-                    "Dataloader function to load training data from given train_data_dir with given train_batch_size."
-                ),
+            "val_data_config": PassConfigParam(
+                type_=Union[DataConfig, Dict],
+                description="Data config for validation.",
             ),
             "training_loop_func": PassConfigParam(
                 type_=Union[Callable, str],
@@ -63,7 +60,11 @@ class QuantizationAwareTraining(Pass):
                     "https://pytorch-lightning.readthedocs.io/en/stable/data/datamodule.html for more details."
                 ),
             ),
-            "train_batch_size": PassConfigParam(type_=int, description="Batch size for training."),
+            "train_batch_size": PassConfigParam(
+                type_=int,
+                default_value=None,
+                description="Batch size for training, overrides train_data_config/dataloader_config.",
+            ),
             "num_epochs": PassConfigParam(type_=int, description="Maximum number of epochs for training."),
             "num_steps": PassConfigParam(
                 type_=int, default_value=-1, description="Maximum number of steps for training."
@@ -106,15 +107,15 @@ class QuantizationAwareTraining(Pass):
         if Path(output_model_path).suffix != ".pt":
             output_model_path += ".pt"
 
-        if config["train_dataloader_func"]:
-            qat_trainer_config.train_dataloader_func = self._user_module_loader.load_object(
-                config["train_dataloader_func"]
-            )
-        qat_trainer_config.train_data_dir = get_local_path_from_root(data_root, qat_trainer_config.train_data_dir)
+        train_data_config = validate_config(config["train_data_config"], DataConfig)
+        if config["train_batch_size"] is not None:
+            train_data_config.dataloader_params["train_batch_size"] = config["train_batch_size"]
+        qat_trainer_config.train_data_config = train_data_config
 
+        if config["val_data_config"]:
+            qat_trainer_config.val_data_config = validate_config(config["val_data_config"], DataConfig)
         if config["training_loop_func"]:
             qat_trainer_config.training_loop_func = self._user_module_loader.load_object(config["training_loop_func"])
-        qat_trainer_config.val_data_dir = get_local_path_from_root(data_root, qat_trainer_config.val_data_dir)
         if config["ptl_module"]:
             qat_trainer_config.ptl_module = self._user_module_loader.load_object(config["ptl_module"])
         if config["ptl_data_module"]:
@@ -122,5 +123,5 @@ class QuantizationAwareTraining(Pass):
         if config["qconfig_func"]:
             qat_trainer_config.qconfig_func = self._user_module_loader.load_object(config["qconfig_func"])
 
-        qat_trainer = QatTrainer(model, qat_trainer_config, output_model_path)
+        qat_trainer = QatTrainer(model, qat_trainer_config, data_root, output_model_path)
         return qat_trainer.execute_local()

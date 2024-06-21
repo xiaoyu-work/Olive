@@ -12,6 +12,7 @@ from torchvision import transforms
 from torchvision.datasets import CIFAR10
 
 from olive.constants import Framework
+from olive.data.registry import Registry
 from olive.model import OliveModelHandler
 
 # -------------------------------------------------------------------------
@@ -84,9 +85,14 @@ def post_process(output):
 # -------------------------------------------------------------------------
 
 
-def create_dataloader(data_dir, batch_size, *args, **kwargs):
-    cifar10_dataset = CIFAR10DataSet(data_dir)
-    return DataLoader(PytorchResNetDataset(cifar10_dataset.val_dataset), batch_size=batch_size, drop_last=True)
+@Registry.register_dataloader("CIFAR10_dataset")
+def create_dataset(data_dir, *args, **kwargs):
+    return CIFAR10DataSet(data_dir, *args, **kwargs)
+
+
+@Registry.register_dataloader("CIFAR10_val_dataloader")
+def create_val_dataloader(dataset, batch_size=1, *args, **kwargs):
+    return DataLoader(PytorchResNetDataset(dataset.val_dataset), batch_size=batch_size, drop_last=True)
 
 
 # -------------------------------------------------------------------------
@@ -124,7 +130,7 @@ def resnet_calibration_reader(data_dir, batch_size, *args, **kwargs):
 # keep this to demo/test custom evaluation function
 def eval_accuracy(model: OliveModelHandler, data_dir, batch_size, device, execution_providers):
     sess = model.prepare_session(inference_settings=None, device=device, execution_providers=execution_providers)
-    dataloader = create_dataloader(data_dir, batch_size)
+    dataloader = create_val_dataloader(data_dir, batch_size)
 
     preds = []
     target = []
@@ -179,9 +185,9 @@ def create_qat_config():
 # -------------------------------------------------------------------------
 
 
-def create_train_dataloader(data_dir, batch_size, *args, **kwargs):
-    cifar10_dataset = CIFAR10DataSet(data_dir)
-    return DataLoader(PytorchResNetDataset(cifar10_dataset.train_dataset), batch_size=batch_size, drop_last=True)
+@Registry.register_dataloader("CIFAR10_train_dataloader")
+def create_train_dataloader(dataset, batch_size, *args, **kwargs):
+    return DataLoader(PytorchResNetDataset(dataset.train_dataset), batch_size=batch_size, drop_last=True)
 
 
 # -------------------------------------------------------------------------

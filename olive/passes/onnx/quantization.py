@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, Union
 import onnx
 from packaging import version
 
-from olive.cache import get_local_path_from_root
 from olive.common.config_utils import validate_config
 from olive.common.pydantic_v1 import validator
 from olive.common.utils import exclude_keys, hash_string
@@ -23,8 +22,8 @@ from olive.model import ONNXModelHandler
 from olive.model.utils import resolve_onnx_path
 from olive.passes import Pass
 from olive.passes.onnx.common import get_external_data_config, model_proto_to_file, model_proto_to_olive_model
-from olive.passes.pass_config import ParamCategory, PassConfigParam
-from olive.resource_path import OLIVE_RESOURCE_ANNOTATIONS, LocalFile
+from olive.passes.pass_config import PassConfigParam
+from olive.resource_path import LocalFile
 from olive.strategy.search_parameter import Boolean, Categorical, Conditional, ConditionalDefault
 
 logger = logging.getLogger(__name__)
@@ -141,39 +140,17 @@ _extra_options_config = {
 
 # static quantization specific config
 _dataloader_config = {
-    "data_dir": PassConfigParam(
-        type_=OLIVE_RESOURCE_ANNOTATIONS,
-        category=ParamCategory.DATA,
-        description="""
-            Path to the directory containing the dataset.
-            For local data, it is required if quant_mode is 'static' and dataloader_func is provided.
-        """,
-    ),
     "batch_size": PassConfigParam(
         type_=int,
-        default_value=1,
+        default_value=None,
         description="""
-            Batch size for calibration, only used if dataloader_func is provided.
+            Batch size for calibration, overrides data_config/dataloader_config.
         """,
-    ),
-    # TODO(trajep): remove this option once we have a data config ready
-    "dataloader_func": PassConfigParam(
-        type_=Union[Callable, str],
-        category=ParamCategory.OBJECT,
-        description="""
-            Function/function name to generate dataloader for calibration,
-            required if quant_mode is 'static' and data_config is None.
-        """,
-    ),
-    "dataloader_func_kwargs": PassConfigParam(
-        type_=Dict[str, Any],
-        description="Keyword arguments for dataloader_func.",
     ),
     "data_config": PassConfigParam(
         type_=Union[DataConfig, Dict],
         description="""
-            Data config for calibration, required if quant_mode is 'static' and
-            dataloader_func is None.
+            Data config for calibration, required if quant_mode is 'static'.
         """,
     ),
 }
@@ -273,22 +250,9 @@ _static_optional_config = {
 }
 
 
-def get_calibration_dataloader(data_root, user_module_loader, config):
-    dataloader = None
-
-    if config["dataloader_func"]:
-        # TODO(trajep): replace legacy dataloader_func with data config
-        data_dir = get_local_path_from_root(data_root, config["data_dir"])
-        dataloader = user_module_loader.call_object(
-            config["dataloader_func"],
-            data_dir,
-            config["batch_size"],
-            **(config["dataloader_func_kwargs"] or {}),
-        )
-    elif config["data_config"]:
-        data_config = validate_config(config["data_config"], DataConfig)
-        dataloader = data_config.to_data_container().create_calibration_dataloader(data_root)
-    return dataloader
+def get_calibration_dataloader(data_root, config):
+    data_config = validate_config(config["data_config"], DataConfig)
+    return data_config.to_data_container().create_calibration_dataloader(data_root)
 
 
 class OnnxQuantization(Pass):
@@ -392,9 +356,7 @@ class OnnxQuantization(Pass):
         run_config = deepcopy(config)
         is_static = run_config["quant_mode"] == "static"
         if is_static:
-            assert (
-                config["dataloader_func"] or config["data_config"]
-            ), "dataloader_func or data_config is required for static quantization."
+            assert config["data_config"], "data_config is required for static quantization."
             # whether to prepare qnn config
             # we do the version check here and not in `validate_search_point` since search point validation
             # is done by the engine. Unless the host is local system, the ort version of the host is
@@ -486,7 +448,7 @@ class OnnxQuantization(Pass):
 
         if is_static:
             # get the dataloader
-            dataloader = get_calibration_dataloader(data_root, self._user_module_loader, config)
+            dataloader = get_calibration_dataloader(data_root, config)
             if config["prepare_qnn_config"]:
                 import inspect
 
@@ -766,7 +728,7 @@ class OnnxMatMul4Quantizer(Pass):
                     # ort 1.17.0+ uses blocksize instead of block_size :(
                     algo_config["blocksize"] = algo_config["block_size"]
                     algo_config.pop("block_size")
-                dataloader = get_calibration_dataloader(data_root, self._user_module_loader, config)
+                dataloader = get_calibration_dataloader(data_root, config)
                 weight_only_quant_config_class = partial(GPTQWeightOnlyQuantConfig, calibration_data_reader=dataloader)
 
             if version.parse(OrtVersion) >= version.parse("1.18.0"):
