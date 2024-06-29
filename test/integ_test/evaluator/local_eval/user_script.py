@@ -9,6 +9,11 @@ from torchvision.transforms import ToTensor
 from olive.data.registry import Registry
 
 
+@Registry.register_dataset()
+def mnist_dataset(data_dir):
+    return datasets.MNIST(data_dir, train=True, download=True, transform=ToTensor())
+
+
 @Registry.register_post_process()
 def mnist_post_process(res):
     return res.argmax(1)
@@ -20,13 +25,8 @@ def mnist_post_process_openvino(res):
     return [res.argmax()]
 
 
-@Registry.register_dataset()
-def mnist_dataset(data_dir):
-    return datasets.MNIST(data_dir, transform=ToTensor())
-
-
 @Registry.register_post_process()
-def mnist_post_process_hf(res):
+def prajjwal1_post_process(res):
     import transformers
 
     if isinstance(res, transformers.modeling_outputs.SequenceClassifierOutput):

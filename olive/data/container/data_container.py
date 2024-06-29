@@ -2,6 +2,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
+from copy import deepcopy
 from typing import ClassVar, Optional
 
 from olive.cache import get_local_path_from_root
@@ -25,7 +26,7 @@ class DataContainer(BaseModel):
 
     def load_dataset(self, data_root_path: Optional[str] = None):
         """Run load dataset."""
-        params_config = self.config.load_dataset_params
+        params_config = deepcopy(self.config.load_dataset_params)
         self._update_params_config(params_config, data_root_path, "data_dir")
         self._update_params_config(params_config, data_root_path, "data_files")
         return self.config.load_dataset(**params_config)

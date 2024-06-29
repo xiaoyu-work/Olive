@@ -1,44 +1,101 @@
 {
-    "input_model":{
+    "input_model": {
         "type": "PyTorchModel",
         "config": {
-            "model_loader": "load_pytorch_origin_model",
-            "model_script": "user_script.py",
+            "hf_config": {
+                "model_name": "Intel/bert-base-uncased-mrpc",
+                "task": "text-classification"
+            },
             "io_config": {
-                "input_names": ["input_ids", "attention_mask", "token_type_ids"],
-                "input_shapes": [[1, 128], [1, 128], [1, 128]],
-                "input_types": ["int64", "int64", "int64"],
-                "output_names": ["output"]
+                "input_names": [
+                    "input_ids",
+                    "attention_mask",
+                    "token_type_ids"
+                ],
+                "input_shapes": [
+                    [
+                        1,
+                        128
+                    ],
+                    [
+                        1,
+                        128
+                    ],
+                    [
+                        1,
+                        128
+                    ]
+                ],
+                "input_types": [
+                    "int64",
+                    "int64",
+                    "int64"
+                ],
+                "output_names": [
+                    "output"
+                ]
             }
         }
     },
+    "data_configs": [
+        {
+            "name": "glue_mrpc",
+            "type": "HuggingfaceContainer",
+            "user_script": "user_script.py",
+            "load_dataset_config": {
+                "params": {
+                    "data_name": "glue",
+                    "split": "validation",
+                    "subset": "mrpc"
+                }
+            },
+            "pre_process_data_config": {
+                "params": {
+                    "input_cols": [
+                        "sentence1",
+                        "sentence2"
+                    ],
+                    "label_cols": [
+                        "label"
+                    ],
+                    "max_samples": 100
+                }
+            },
+            "dataloader_config": {
+                "params": {
+                    "batch_size": 1
+                }
+            }
+        }
+    ],
     "evaluators": {
         "common_evaluator": {
             "metrics":[
                 {
                     "name": "accuracy",
                     "type": "accuracy",
+                    "data_config": "glue_mrpc",
                     "sub_types": [
-                        {"name": "accuracy_score", "priority": 1}
+                        {
+                            "name": "accuracy_score",
+                            "priority": 1
+                        }
                     ],
                     "user_config":{
                         "post_processing_func": "post_process",
-                        "user_script": "user_script.py",
-                        "dataloader_func": "create_dataloader",
-                        "batch_size": 1
+                        "user_script": "user_script.py"
                     }
                 },
                 {
                     "name": "latency",
                     "type": "latency",
+                    "data_config": "glue_mrpc",
                     "sub_types": [
-                        {"name": "avg", "priority": 2}
-                    ],
-                    "user_config":{
-                        "user_script": "user_script.py",
-                        "dataloader_func": "create_dataloader",
-                        "batch_size": 1
-                    }
+                        {
+                            "name": "avg",
+                            "priority": 2
+                        }
+                    ]
                 }
             ]
         }

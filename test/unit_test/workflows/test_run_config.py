@@ -42,17 +42,6 @@ class TestRunConfig:
         for dc in run_config.data_configs:
             dc.to_data_container().create_dataloader(data_root_path=None)
 
-    @pytest.mark.parametrize("system", ["local_system", "azureml_system"])
-    def test_user_script_config(self, system):
-        with self.user_script_config_file.open() as f:
-            user_script_config = json.load(f)
-
-        user_script_config["engine"]["host"] = system
-        user_script_config["engine"]["target"] = system
-        config = RunConfig.parse_obj(user_script_config)
-        for metric in config.evaluators["common_evaluator"].metrics:
-            assert metric.user_config.data_dir.get_path().startswith("azureml://")
-
     def test_config_without_azureml_config(self):
         with self.user_script_config_file.open() as f:
             user_script_config = json.load(f)
@@ -75,9 +64,7 @@ class TestRunConfig:
                 yaml.safe_dump(config, f)
             config = config_file
 
-        config = RunConfig.parse_file_or_obj(config)
-        for metric in config.evaluators["common_evaluator"].metrics:
-            assert metric.user_config.data_dir.get_path().startswith("azureml://")
+        RunConfig.parse_file_or_obj(config)
 
     @pytest.fixture()
     def mock_aml_credentials(self):

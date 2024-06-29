@@ -7,18 +7,19 @@ from olive.data.registry import Registry
 
 
 @Registry.register_default_dataset()
-def local_dataset(data_dir, label_cols=None, **kwargs):
-    pass
+def local_dataset(data_dir, **kwargs):
+    return None
 
 
 @Registry.register_dataset()
-def simple_dataset(data_dir, input_data, label_cols=None, **kwargs):
+def simple_dataset(**kwargs):
     """Create a simple dataset from input data.
 
     The input data can be:
     1. a text
     2. a tensor
     """
+    return
 
 
 @Registry.register_dataset()
@@ -35,8 +36,8 @@ def huggingface_dataset(data_dir, data_name=None, subset=None, split="validation
 
 
 @Registry.register_dataset()
-def dummy_dataset(data_dir, input_shapes, input_names=None, input_types=None, max_samples=32):
-    return DummyDataset(input_shapes, input_names, input_types, max_samples)
+def dummy_dataset(input_shapes, input_names=None, input_types=None, max_samples=32, **kwargs):
+    return DummyDataset(input_shapes, input_names, input_types, max_samples, **kwargs)
 
 
 @Registry.register_dataset()

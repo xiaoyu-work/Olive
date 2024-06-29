@@ -40,6 +40,7 @@ def get_dataloader_config():
                     "type": "dummy_dataset",
                     "params": {"data_dir": "data", "input_shapes": [(1, 1)], "max_samples": 1},
                 },
+                "post_process_data_config": {"type": "post_processing_func"},
             }
         ],
         "evaluators": {
@@ -56,9 +57,6 @@ def get_dataloader_config():
                             }
                         ],
                         "data_config": "test_data_config",
-                        "user_config": {
-                            "post_processing_func": post_processing_func,
-                        },
                     }
                 ]
             }

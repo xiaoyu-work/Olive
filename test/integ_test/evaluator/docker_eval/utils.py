@@ -10,55 +10,64 @@ from zipfile import ZipFile
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 
+from olive.common.config_utils import validate_config
+from olive.data.config import DataComponentConfig, DataConfig
 from olive.evaluator.metric import AccuracySubType, LatencySubType, Metric, MetricType
 from olive.systems.docker import DockerSystem, LocalDockerConfig
 
 # pylint: disable=redefined-outer-name
 
+_current_dir, _models_dir, _data_dir, _user_script = None, None, None, None
+
 
 def get_directories():
-    current_dir = Path(__file__).resolve().parent
+    global _current_dir, _models_dir, _data_dir, _user_script
 
-    models_dir = current_dir / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
+    _current_dir = Path(__file__).resolve().parent
 
-    data_dir = current_dir / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
+    _models_dir = _current_dir / "models"
+    _models_dir.mkdir(parents=True, exist_ok=True)
 
-    return current_dir, models_dir, data_dir
+    _data_dir = _current_dir / "data"
+    _data_dir.mkdir(parents=True, exist_ok=True)
+
+    _user_script = _current_dir / "user_script.py"
+
+    return _current_dir, _models_dir, _data_dir, _user_script
 
 
-current_dir, models_dir, data_dir = get_directories()
-user_script = str(current_dir / "user_script.py")
+def _get_metric_data_config(name, dataset, post_process=None):
+    data_config = DataConfig(
+        name=name,
+        type="HuggingfaceContainer",
+        user_script=str(_user_script),
+        load_dataset_config=DataComponentConfig(
+            type=dataset,
+            params={"data_dir": str(_data_dir)},
+        ),
+        pre_process_data_config=DataComponentConfig(type="skip_pre_process"),
+    )
+    if post_process:
+        data_config.post_process_data_config = DataComponentConfig(type=post_process)
+    return validate_config(data_config, DataConfig)
 
 
-def get_accuracy_metric(post_process, dataloader_func="create_dataloader"):
-    accuracy_metric_config = {
-        "user_script": user_script,
-        "post_processing_func": post_process,
-        "data_dir": data_dir,
-        "dataloader_func": dataloader_func,
-    }
+def get_accuracy_metric(post_process, dataset="mnist_dataset"):
     sub_types = [{"name": AccuracySubType.ACCURACY_SCORE, "metric_config": {"task": "multiclass", "num_classes": 10}}]
     return Metric(
         name="accuracy",
         type=MetricType.ACCURACY,
         sub_types=sub_types,
-        user_config=accuracy_metric_config,
+        data_config=_get_metric_data_config("accuracy_metric_data_config", dataset, post_process),
     )
 
 
-def get_latency_metric(dataloader_func="create_dataloader"):
-    latency_metric_config = {
-        "user_script": user_script,
-        "data_dir": data_dir,
-        "dataloader_func": dataloader_func,
-    }
+def get_latency_metric():
     return Metric(
         name="latency",
         type=MetricType.LATENCY,
         sub_types=[{"name": LatencySubType.AVG}],
-        user_config=latency_metric_config,
+        data_config=_get_metric_data_config("latency_metric_data_config", "mnist_dataset"),
     )
 
 
@@ -66,18 +75,18 @@ def download_models():
     pytorch_model_config = {
         "container": "olivetest",
         "blob": "models/model.pt",
-        "download_path": models_dir / "model.pt",
+        "download_path": _models_dir / "model.pt",
     }
     download_azure_blob(**pytorch_model_config)
 
     onnx_model_config = {
         "container": "olivetest",
         "blob": "models/model.onnx",
-        "download_path": models_dir / "model.onnx",
+        "download_path": _models_dir / "model.onnx",
     }
     download_azure_blob(**onnx_model_config)
 
-    download_path = models_dir / "openvino.zip"
+    download_path = _models_dir / "openvino.zip"
     openvino_model_config = {
         "container": "olivetest",
         "blob": "models/openvino.zip",
@@ -85,12 +94,12 @@ def download_models():
     }
     download_azure_blob(**openvino_model_config)
     with ZipFile(download_path) as zip_ref:
-        zip_ref.extractall(models_dir)
-    return str(models_dir / "openvino")
+        zip_ref.extractall(_models_dir)
+    return str(_models_dir / "openvino")
 
 
 def download_data():
-    datasets.MNIST(data_dir, download=True, transform=ToTensor())
+    datasets.MNIST(_data_dir, download=True, transform=ToTensor())
 
 
 def get_huggingface_model():
@@ -98,26 +107,28 @@ def get_huggingface_model():
 
 
 def get_pytorch_model():
-    return {"model_path": str(models_dir / "model.pt")}
+    return {"model_path": str(_models_dir / "model.pt")}
 
 
 def get_onnx_model():
-    return {"model_path": str(models_dir / "model.onnx")}
+    return {"model_path": str(_models_dir / "model.onnx")}
 
 
 def get_openvino_model():
-    return {"model_path": str(models_dir / "openvino")}
+    return {"model_path": str(_models_dir / "openvino")}
 
 
 def delete_directories():
-    shutil.rmtree(data_dir)
-    shutil.rmtree(models_dir)
+    global _current_dir, _models_dir, _data_dir, _user_script
+    shutil.rmtree(_data_dir)
+    shutil.rmtree(_models_dir)
+    _current_dir = _models_dir = _data_dir = _user_script = None
 
 
 def get_docker_target():
     local_docker_config = LocalDockerConfig(
         image_name="olive",
-        build_context_path=str(current_dir / "dockerfile"),
+        build_context_path=str(_current_dir / "dockerfile"),
         dockerfile="Dockerfile",
     )
     return DockerSystem(local_docker_config=local_docker_config, is_dev=True)

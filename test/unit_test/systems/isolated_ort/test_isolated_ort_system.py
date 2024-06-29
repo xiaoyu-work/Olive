@@ -126,7 +126,6 @@ class TestIsolatedORTEvaluator:
     def test__inference(self):
         model = get_onnx_model_config().create_model()
         metric = get_accuracy_metric(AccuracySubType.ACCURACY_SCORE)
-        metric = OliveEvaluator.generate_metric_user_config_with_model_io(metric, model)
         dataloader, _, post_func = OliveEvaluator.get_user_config(model.framework, None, metric)
 
         actual_model_output, actual_target = self.evaluator._inference(
@@ -154,7 +153,6 @@ class TestIsolatedORTEvaluator:
     def test__evaluate_raw_latency(self):
         model = get_onnx_model_config().create_model()
         metric = get_latency_metric(LatencySubType.AVG)
-        metric = OliveEvaluator.generate_metric_user_config_with_model_io(metric, model)
         dataloader, _, _ = OliveEvaluator.get_user_config(model.framework, None, metric)
 
         res = self.evaluator._evaluate_raw_latency(

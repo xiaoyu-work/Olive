@@ -88,10 +88,10 @@ def create_metric_volumes_list(data_root: str, metrics: List["Metric"], containe
             volume_list.append(f"{script_dir_path}:{script_dir_mount_path}")
             metric.user_config.script_dir = script_dir_mount_path
 
-        if data_root or metric.user_config.data_dir:
-            data_dir = get_local_path_from_root(data_root, metric.user_config.data_dir)
+        if data_root or metric.data_config.load_dataset_params.get("data_dir"):
+            data_dir = get_local_path_from_root(data_root, metric.data_config.load_dataset_params.get("data_dir"))
             volume_list.append(f"{data_dir}:{str(metric_path / 'data_dir')}")
-            metric.user_config.data_dir = str(metric_path / "data_dir")
+            metric.data_config.load_dataset_params["data_dir"] = str(metric_path / "data_dir")
 
     return volume_list
 

@@ -149,7 +149,6 @@ class DockerSystem(OliveSystem):
         )
         volumes_list.extend(model_mount_str_list)
 
-        # data_dir or data_config
         docker_data_paths, data_mount_str_list = self._create_data_mounts_for_pass(
             data_root, container_root_path, the_pass
         )

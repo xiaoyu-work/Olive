@@ -14,6 +14,21 @@ def post_process(output_data, **kwargs):
 
 
 @Registry.register_post_process()
+def skip_post_process(output_data, **kwargs):
+    """Post-process data.
+
+    Args:
+        output_data (object): Model output to be post-processed.
+        **kwargs: Additional named arguments.
+
+    Returns:
+        object: Post-processed data.
+
+    """
+    return output_data
+
+
+@Registry.register_post_process()
 def text_classification_post_process(output_data, **kwargs):
     """Post-process data.
 

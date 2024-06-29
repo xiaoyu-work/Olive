@@ -1,5 +1,4 @@
 from test.unit_test.utils import (
-    create_dummy_dataloader,
     get_pytorch_model,
     get_pytorch_model_config,
     get_pytorch_model_io_config,
@@ -20,20 +19,23 @@ INPUT_MODEL_CONFIG = {
     },
 }
 
+DATA_CONFIGS = [{"name": "metric_data_config", "type": "DummyDataContainer"}]
+
 EVALUATORS_CONFIG = {
     "metrics": [
         {
             "name": "latency",
             "type": "latency",
+            "data_config": "metric_data_config",
             "sub_types": [
                 {
                     "name": "avg",
                 },
             ],
-            "user_config": {"dataloader_func": create_dummy_dataloader},
         }
     ]
 }
+
 PASS_CONFIG = {
     "qat": {
         "type": "QuantizationAwareTraining",
@@ -55,12 +57,14 @@ PASS_CONFIG = {
     [
         {
             "input_model": INPUT_MODEL_CONFIG,
+            "data_configs": DATA_CONFIGS,
             "evaluators": {"common_evaluator": EVALUATORS_CONFIG},
             "passes": PASS_CONFIG,
             "engine": {"evaluator": "common_evaluator"},
         },
         {
             "input_model": INPUT_MODEL_CONFIG,
+            "data_configs": DATA_CONFIGS,
             "passes": PASS_CONFIG,
             "engine": {"evaluator": EVALUATORS_CONFIG},
         },
@@ -81,7 +85,7 @@ def test_run_without_ep(mock_model_to_json, mock_model_from_json, mock_run, conf
 
     mock_run.return_value = get_pytorch_model()
     mock_model_from_json.return_value = get_pytorch_model_config()
-    mock_model_to_json.return_value = {"type": "PyTorchModel", "config": {}}
+    mock_model_to_json.return_value = {"type": "PyTorchModel", "config": {"io_config": {}}}
     ret = olive_run(config)
     assert len(ret) == 1
     assert next(iter(ret)) == AcceleratorSpec("cpu")

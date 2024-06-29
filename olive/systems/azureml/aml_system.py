@@ -577,14 +577,17 @@ class AzureMLSystem(OliveSystem):
             metric_script_dir = Input(type=AssetTypes.URI_FOLDER, path=metric_script_dir)
             metric_config["user_config"]["script_dir"] = None
 
-        metric_data_dir = metric_config["user_config"]["data_dir"]
-        # convert the dict to a resource path object
-        metric_data_dir = create_resource_path(metric_data_dir)
-        metric_data_dir = normalize_data_path(data_root, metric_data_dir)
-        if metric_data_dir:
-            metric_data_dir = self._create_args_from_resource_path(metric_data_dir)
+        if metric_config.get("data_config"):
+            metric_data_dir = (
+                metric_config["data_config"].get("load_dataset_config", {}).get("params", {}).get("data_dir")
+            )
+            # convert the dict to a resource path object
+            metric_data_dir = create_resource_path(metric_data_dir)
+            metric_data_dir = normalize_data_path(data_root, metric_data_dir)
             if metric_data_dir:
-                metric_config["user_config"]["data_dir"] = None
+                metric_data_dir = self._create_args_from_resource_path(metric_data_dir)
+                if metric_data_dir:
+                    metric_config["data_config"]["load_dataset_config"]["params"]["data_dir"] = None
 
         metric_config_path = tmp_dir / "metric_config.json"
         with metric_config_path.open("w") as f:
