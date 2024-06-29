@@ -12,6 +12,7 @@ from torchvision import transforms
 from torchvision.datasets import CIFAR10
 
 from olive.constants import Framework
+from olive.data.registry import Registry
 from olive.model import OliveModelHandler
 
 # -------------------------------------------------------------------------
@@ -84,9 +85,20 @@ def post_process(output):
 # -------------------------------------------------------------------------
 
 
+@Registry.register_dataset()
+def create_cifar10_dataset(data_dir):
+    return CIFAR10DataSet(data_dir)
+
+
+@Registry.register_dataloader()
+def create_cifar10_dataloader(dataset, batch_size=1, *args, **kwargs):
+    return DataLoader(PytorchResNetDataset(dataset.val_dataset), batch_size=batch_size, drop_last=True)
+
+
+# TODO(shaahji): Remove this once metrics transitions to using DataConfig only!
 def create_dataloader(data_dir, batch_size, *args, **kwargs):
-    cifar10_dataset = CIFAR10DataSet(data_dir)
-    return DataLoader(PytorchResNetDataset(cifar10_dataset.val_dataset), batch_size=batch_size, drop_last=True)
+    cifar10_dataset = create_cifar10_dataset(data_dir)
+    return create_cifar10_dataloader(cifar10_dataset, *args, batch_size=batch_size, drop_last=True, **kwargs)
 
 
 # -------------------------------------------------------------------------
