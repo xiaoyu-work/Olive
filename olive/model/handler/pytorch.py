@@ -50,6 +50,7 @@ class PyTorchModelHandler(
         "model_loader",
         "dummy_inputs_func",
         "hf_config",
+        "mlflow_transformer_model_cache_dir",
         "generative",
     )
 
@@ -65,7 +66,7 @@ class PyTorchModelHandler(
         hf_config: Union[Dict[str, Any], HfConfig] = None,
         adapter_path: OLIVE_RESOURCE_ANNOTATIONS = None,
         model_attributes: Optional[Dict[str, Any]] = None,
-        mlflow_transformer_model_cache_dir: Optional[str] = None,
+        mlflow_transformer_model_cache_dir: Optional[str] = "~",
         generative: bool = False,
     ):
         if not (
